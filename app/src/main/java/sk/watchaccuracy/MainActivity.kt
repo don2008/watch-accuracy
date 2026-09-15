@@ -12,6 +12,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.AspectRatio
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.Preview
@@ -77,7 +78,14 @@ private fun WatchAccuracyApp() {
     var language by remember { mutableStateOf(repo.language()) }
     val t = uiText(language)
     val colors = when (palette) {
-        AppPalette.CLASSIC -> lightColorScheme(primary = Color(0xFF22241E), secondary = Color(0xFF9A7535), background = Color(0xFFF4F1E8), surface = Color(0xFFFFFDF7))
+        AppPalette.CLASSIC -> darkColorScheme(
+            primary = Color(0xFFD8B568), onPrimary = Color(0xFF17140D),
+            secondary = Color(0xFFA8D39D), onSecondary = Color(0xFF10210F),
+            background = Color(0xFF0B0D0A), onBackground = Color(0xFFF3EFE6),
+            surface = Color(0xFF171A14), onSurface = Color(0xFFF3EFE6),
+            surfaceVariant = Color(0xFF20241C), onSurfaceVariant = Color(0xFFBDB9AE),
+            outline = Color(0xFF383D32), secondaryContainer = Color(0xFF2D3328)
+        )
         AppPalette.BLUE -> lightColorScheme(primary = Color(0xFF172538), secondary = Color(0xFF527FA6), background = Color(0xFFF0F4F7), surface = Color(0xFFF9FCFF))
         AppPalette.MONO -> lightColorScheme(primary = Color(0xFF191919), secondary = Color(0xFF666666), background = Color(0xFFF3F3F3), surface = Color.White)
     }
@@ -85,6 +93,10 @@ private fun WatchAccuracyApp() {
         (context as? Activity)?.window?.apply {
             statusBarColor = colors.background.toArgb()
             navigationBarColor = colors.background.toArgb()
+            androidx.core.view.WindowCompat.getInsetsController(this, decorView).apply {
+                isAppearanceLightStatusBars = palette != AppPalette.CLASSIC
+                isAppearanceLightNavigationBars = palette != AppPalette.CLASSIC
+            }
         }
     }
     MaterialTheme(colorScheme = colors) {
@@ -123,8 +135,9 @@ private fun WatchAccuracyApp() {
         else LazyColumn(Modifier.padding(pad).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             items(watches) { watch ->
                 val accent = MaterialTheme.colorScheme.secondary
-                Card(Modifier.fillMaxWidth().clickable { open(watch.id) }) { Row(Modifier.padding(15.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Canvas(Modifier.size(54.dp)) { drawCircle(accent, style = Stroke(2.dp.toPx())); drawLine(Color.DarkGray, center, center.copy(y = center.y - 16.dp.toPx()), 2.dp.toPx()); drawLine(Color.DarkGray, center, center.copy(x = center.x + 13.dp.toPx(), y = center.y + 7.dp.toPx()), 2.dp.toPx()) }
+                val clockHand = MaterialTheme.colorScheme.onSurface
+                Card(Modifier.fillMaxWidth().border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(20.dp)).clickable { open(watch.id) }, shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) { Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Canvas(Modifier.size(58.dp)) { drawCircle(accent, style = Stroke(2.dp.toPx())); drawLine(clockHand, center, center.copy(y = center.y - 17.dp.toPx()), 2.dp.toPx()); drawLine(clockHand, center, center.copy(x = center.x + 14.dp.toPx(), y = center.y + 8.dp.toPx()), 2.dp.toPx()) }
                     Column(Modifier.padding(start = 14.dp).weight(1f)) { Text(watch.brand, fontSize = 19.sp, fontFamily = FontFamily.Serif); Text("${watch.model} · ${watch.measurements.size} ${t.measurements}", style = MaterialTheme.typography.bodySmall) }
                     Text(latestRate(t, watch), color = MaterialTheme.colorScheme.secondary)
                 } }
@@ -170,8 +183,10 @@ private fun latestRate(t: UiText, w: Watch): String {
 @Composable private fun MeasurementRow(t: UiText, watch: Watch, measurement: Measurement, open: () -> Unit) {
     val index = watch.measurements.indexOfFirst { it.id == measurement.id }
     val rate = if (index > 0) DeviationCalculator.secondsPerDay(watch.measurements[index - 1], measurement)?.let { String.format(Locale.getDefault(), "%+.1f", it) } ?: "—" else "—"
+    val accent = MaterialTheme.colorScheme.primary; val hand = MaterialTheme.colorScheme.onSurface
     Row(Modifier.fillMaxWidth().clickable(onClick = open).padding(vertical = 15.dp), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) { Text(date(measurement.capturedAtMillis)); Text("${t.photo} ${clock(measurement.capturedAtMillis)} · ${t.dial} ${dialTime(measurement)}", style = MaterialTheme.typography.bodySmall) }; Text(rate, color = MaterialTheme.colorScheme.secondary)
+        Canvas(Modifier.size(42.dp)) { drawCircle(accent, style = Stroke(1.8.dp.toPx())); drawLine(hand, center, center.copy(y = center.y - 11.dp.toPx()), 1.6.dp.toPx()); drawLine(hand, center, center.copy(x = center.x + 9.dp.toPx(), y = center.y + 5.dp.toPx()), 1.6.dp.toPx()) }
+        Column(Modifier.padding(start = 13.dp).weight(1f)) { Text(date(measurement.capturedAtMillis)); Text("${t.photo} ${clock(measurement.capturedAtMillis)} · ${t.dial} ${dialTime(measurement)}", style = MaterialTheme.typography.bodySmall) }; Text(rate, color = MaterialTheme.colorScheme.secondary)
     }
     HorizontalDivider()
 }
@@ -205,8 +220,9 @@ private fun latestRate(t: UiText, w: Watch): String {
     LaunchedEffect(Unit) { if (!permitted) request.launch(Manifest.permission.CAMERA) }
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         if (permitted) androidx.compose.ui.viewinterop.AndroidView(factory = { ctx -> PreviewView(ctx).also { view ->
+            view.scaleType = PreviewView.ScaleType.FIT_CENTER
             val future = ProcessCameraProvider.getInstance(ctx)
-            future.addListener({ val provider = future.get(); val preview = Preview.Builder().build().also { it.surfaceProvider = view.surfaceProvider }; imageCapture = ImageCapture.Builder().setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY).setFlashMode(ImageCapture.FLASH_MODE_OFF).build(); provider.unbindAll(); boundCamera = provider.bindToLifecycle(lifecycle, CameraSelector.DEFAULT_BACK_CAMERA, preview, imageCapture) }, ContextCompat.getMainExecutor(ctx))
+            future.addListener({ val provider = future.get(); val preview = Preview.Builder().setTargetAspectRatio(AspectRatio.RATIO_4_3).build().also { it.surfaceProvider = view.surfaceProvider }; imageCapture = ImageCapture.Builder().setTargetAspectRatio(AspectRatio.RATIO_4_3).setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY).setFlashMode(ImageCapture.FLASH_MODE_OFF).build(); provider.unbindAll(); boundCamera = provider.bindToLifecycle(lifecycle, CameraSelector.DEFAULT_BACK_CAMERA, preview, imageCapture) }, ContextCompat.getMainExecutor(ctx))
         } }, modifier = Modifier.fillMaxSize()) else Text(t.cameraPermission, color = Color.White, modifier = Modifier.align(Alignment.Center))
         Row(Modifier.align(Alignment.TopCenter).fillMaxWidth().statusBarsPadding().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
             IconButton(back, Modifier.background(Color.Black.copy(alpha=.45f), CircleShape)) { Icon(Icons.Default.Close, t.close, tint = Color.White) }
@@ -219,7 +235,10 @@ private fun latestRate(t: UiText, w: Watch): String {
 }
 
 @Composable private fun CameraGuide(shape: DialShape, modifier: Modifier) {
-    val dims = when (shape) { DialShape.RECTANGLE -> Modifier.size(190.dp, 285.dp); else -> Modifier.size(270.dp) }
+    val dims = when (shape) {
+        DialShape.RECTANGLE -> Modifier.fillMaxWidth(.50f).aspectRatio(2f / 3f)
+        else -> Modifier.fillMaxWidth(.72f).aspectRatio(1f)
+    }
     val corner = when (shape) { DialShape.ROUND -> CircleShape; DialShape.SQUARE -> RoundedCornerShape(34.dp); DialShape.RECTANGLE -> RoundedCornerShape(24.dp) }
     Box(modifier.then(dims).border(2.dp, Color(0xFFD1AD68), corner))
 }
@@ -282,7 +301,7 @@ private fun latestRate(t: UiText, w: Watch): String {
 }
 
 @Composable private fun PermissionRow(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, sub: String, initial: Boolean) { var on by remember { mutableStateOf(initial) }; Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Icon(icon, null); Column(Modifier.padding(start=12.dp).weight(1f)) { Text(title); Text(sub, style=MaterialTheme.typography.bodySmall) }; Switch(on, {on=it}) } }
-@Composable private fun PrimaryBottomButton(text: String, icon: androidx.compose.ui.graphics.vector.ImageVector, click: () -> Unit, enabled: Boolean = true) { Surface(shadowElevation = 4.dp) { Button(click, Modifier.fillMaxWidth().padding(16.dp).height(52.dp), enabled = enabled) { Icon(icon, null); Spacer(Modifier.width(8.dp)); Text(text) } } }
+@Composable private fun PrimaryBottomButton(text: String, icon: androidx.compose.ui.graphics.vector.ImageVector, click: () -> Unit, enabled: Boolean = true) { Surface(color = MaterialTheme.colorScheme.background) { Button(click, Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp).height(58.dp), enabled = enabled, shape = RoundedCornerShape(18.dp), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary)) { Icon(icon, null); Spacer(Modifier.width(9.dp)); Text(text, fontSize = 17.sp) } } }
 
 private fun date(ms: Long) = SimpleDateFormat("d. M. yyyy", Locale.getDefault()).format(Date(ms))
 private fun clock(ms: Long) = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(ms))

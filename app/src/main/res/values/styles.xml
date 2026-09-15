@@ -1,8 +1,9 @@
 <resources>
-    <style name="Theme.WatchAccuracy" parent="android:style/Theme.Material.Light.NoActionBar">
+    <style name="Theme.WatchAccuracy" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:fontFamily">sans</item>
-        <item name="android:windowLightStatusBar">true</item>
-        <item name="android:statusBarColor">#F4F1E8</item>
-        <item name="android:navigationBarColor">#F4F1E8</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">#0B0D0A</item>
+        <item name="android:navigationBarColor">#0B0D0A</item>
+        <item name="android:windowActionModeOverlay">true</item>
     </style>
 </resources>
