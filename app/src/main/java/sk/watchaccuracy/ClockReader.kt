@@ -56,7 +56,9 @@ object ClockReader {
         val minuteImageAngle = bestNear(expectedMinuteAngle + rotation, 6, 2)
         val secondImageAngle = geometricSecondAngle
         var minute = referenceMinute
-        val second = ((wrap(secondImageAngle - rotation) + 3) / 6) % 60
+        // A hand immediately before 12 is still on second 59. Rounding would turn
+        // 59.x into 60 and then modulo into the incorrect value 0.
+        val second = wrap(secondImageAngle - rotation) / 6
         var hour = referenceHour
         // Resolve only a genuine minute-boundary crossing. This app measures a
         // normally running watch, so inventing a different minute from dial noise is
