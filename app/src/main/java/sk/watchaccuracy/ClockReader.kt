@@ -65,7 +65,8 @@ object ClockReader {
 
     private fun radialBands(bitmap: Bitmap): Array<FloatArray> {
         val result = Array(360) { FloatArray(3) }; val count = Array(360) { IntArray(3) }
-        val cx = bitmap.width / 2.0; val cy = bitmap.height / 2.0; val radius = minOf(bitmap.width, bitmap.height) * .5
+        val cx = bitmap.width / 2.0; val cy = bitmap.height / 2.0
+        val radius = detectDialRadius(bitmap, cx, cy)
         for (angle in 0 until 360) {
             val rad = angle * PI / 180.0 - PI / 2
             for (ri in (radius * .10).roundToInt()..(radius * .94).roundToInt() step 2) {
@@ -78,6 +79,33 @@ object ClockReader {
             for (b in 0..2) result[angle][b] /= count[angle][b].coerceAtLeast(1)
         }
         return result
+    }
+
+    /** Finds the inner dial edge, not the crop/bezel edge. Watches often occupy only
+     * part of the round template and using half of the bitmap as the hand radius makes
+     * hour markers and bezel numerals look like hands. */
+    private fun detectDialRadius(bitmap: Bitmap, cx: Double, cy: Double): Double {
+        val size = minOf(bitmap.width, bitmap.height).toDouble()
+        var bestRadius = size * .31
+        var bestEdge = -1.0
+        for (r in (size * .22).roundToInt()..(size * .39).roundToInt()) {
+            var edge = 0.0
+            var samples = 0
+            for (angle in 0 until 360 step 5) {
+                val rad = angle * PI / 180.0 - PI / 2
+                fun luminance(radius: Int): Int {
+                    val x = (cx + cos(rad) * radius).roundToInt().coerceIn(0, bitmap.width - 1)
+                    val y = (cy + sin(rad) * radius).roundToInt().coerceIn(0, bitmap.height - 1)
+                    val p = bitmap.getPixel(x, y)
+                    return (Color.red(p) * 30 + Color.green(p) * 59 + Color.blue(p) * 11) / 100
+                }
+                edge += kotlin.math.abs(luminance(r + 2) - luminance(r - 2))
+                samples++
+            }
+            val average = edge / samples.coerceAtLeast(1)
+            if (average > bestEdge) { bestEdge = average; bestRadius = r.toDouble() }
+        }
+        return bestRadius
     }
 
     private fun normalizeAngles(values: Array<FloatArray>): Array<FloatArray> {
