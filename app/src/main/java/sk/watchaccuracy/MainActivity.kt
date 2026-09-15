@@ -15,6 +15,7 @@ import androidx.camera.core.CameraSelector
 import androidx.camera.core.AspectRatio
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
+import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
@@ -48,6 +49,8 @@ import androidx.compose.ui.text.font.FontFamily
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
+import java.util.concurrent.TimeUnit
+import android.view.MotionEvent
 import androidx.core.content.ContextCompat
 
 private sealed interface Screen {
@@ -222,7 +225,26 @@ private fun latestRate(t: UiText, w: Watch): String {
         if (permitted) androidx.compose.ui.viewinterop.AndroidView(factory = { ctx -> PreviewView(ctx).also { view ->
             view.scaleType = PreviewView.ScaleType.FIT_CENTER
             val future = ProcessCameraProvider.getInstance(ctx)
-            future.addListener({ val provider = future.get(); val preview = Preview.Builder().setTargetAspectRatio(AspectRatio.RATIO_4_3).build().also { it.surfaceProvider = view.surfaceProvider }; imageCapture = ImageCapture.Builder().setTargetAspectRatio(AspectRatio.RATIO_4_3).setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY).setFlashMode(ImageCapture.FLASH_MODE_OFF).build(); provider.unbindAll(); boundCamera = provider.bindToLifecycle(lifecycle, CameraSelector.DEFAULT_BACK_CAMERA, preview, imageCapture) }, ContextCompat.getMainExecutor(ctx))
+            future.addListener({
+                val provider = future.get()
+                val preview = Preview.Builder().setTargetAspectRatio(AspectRatio.RATIO_4_3).build().also { it.surfaceProvider = view.surfaceProvider }
+                imageCapture = ImageCapture.Builder().setTargetAspectRatio(AspectRatio.RATIO_4_3).setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY).setFlashMode(ImageCapture.FLASH_MODE_OFF).build()
+                provider.unbindAll()
+                boundCamera = provider.bindToLifecycle(lifecycle, CameraSelector.DEFAULT_BACK_CAMERA, preview, imageCapture)
+                val camera = boundCamera ?: return@addListener
+                val zoom = 3f.coerceIn(camera.cameraInfo.zoomState.value?.minZoomRatio ?: 1f, camera.cameraInfo.zoomState.value?.maxZoomRatio ?: 3f)
+                camera.cameraControl.setZoomRatio(zoom)
+                fun focus(x: Float, y: Float) {
+                    val point = view.meteringPointFactory.createPoint(x, y)
+                    val action = FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE)
+                        .setAutoCancelDuration(4, TimeUnit.SECONDS).build()
+                    camera.cameraControl.startFocusAndMetering(action)
+                }
+                view.setOnTouchListener { _, event ->
+                    if (event.action == MotionEvent.ACTION_UP) { focus(event.x, event.y); view.performClick(); true } else true
+                }
+                view.postDelayed({ focus(view.width / 2f, view.height / 2f) }, 700)
+            }, ContextCompat.getMainExecutor(ctx))
         } }, modifier = Modifier.fillMaxSize()) else Text(t.cameraPermission, color = Color.White, modifier = Modifier.align(Alignment.Center))
         Row(Modifier.align(Alignment.TopCenter).fillMaxWidth().statusBarsPadding().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
             IconButton(back, Modifier.background(Color.Black.copy(alpha=.45f), CircleShape)) { Icon(Icons.Default.Close, t.close, tint = Color.White) }
