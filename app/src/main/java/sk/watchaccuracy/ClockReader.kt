@@ -125,26 +125,33 @@ object ClockReader {
         val cx = bitmap.width / 2.0
         val cy = bitmap.height / 2.0
         val radius = detectDialRadius(bitmap, cx, cy)
-        fun luminance(angle: Int, r: Double): Double {
+        fun sample(angle: Int, r: Double): Pair<Double, Double> {
             val rad = wrap(angle) * PI / 180.0 - PI / 2
             val x = (cx + cos(rad) * r).roundToInt().coerceIn(0, bitmap.width - 1)
             val y = (cy + sin(rad) * r).roundToInt().coerceIn(0, bitmap.height - 1)
             val p = bitmap.getPixel(x, y)
-            return (Color.red(p) * 30 + Color.green(p) * 59 + Color.blue(p) * 11) / 100.0
+            val red = Color.red(p); val green = Color.green(p); val blue = Color.blue(p)
+            val luminance = (red * 30 + green * 59 + blue * 11) / 100.0
+            val saturation = maxOf(red, green, blue) - minOf(red, green, blue)
+            return luminance to saturation.toDouble()
         }
         return (0 until 360).maxBy { angle ->
             var inner = 0.0; var innerCount = 0
             var outer = 0.0; var outerCount = 0
+            var saturation = 0.0; var saturationCount = 0
             for (ri in (radius * .16).roundToInt()..(radius * .90).roundToInt() step 2) {
-                val here = luminance(angle, ri.toDouble())
-                val sides = (luminance(angle - 3, ri.toDouble()) + luminance(angle + 3, ri.toDouble())) / 2.0
-                val contrast = kotlin.math.abs(here - sides)
+                val here = sample(angle, ri.toDouble())
+                val left = sample(angle - 3, ri.toDouble()).first
+                val right = sample(angle + 3, ri.toDouble()).first
+                val contrast = kotlin.math.abs(here.first - (left + right) / 2.0)
                 if (ri < radius * .52) { inner += contrast; innerCount++ }
                 else { outer += contrast; outerCount++ }
+                if (contrast > 8.0) { saturation += here.second; saturationCount++ }
             }
             val i = inner / innerCount.coerceAtLeast(1)
             val o = outer / outerCount.coerceAtLeast(1)
-            minOf(i, o) * 1.5 + o
+            val colorPenalty = saturation / saturationCount.coerceAtLeast(1) * .35
+            minOf(i, o) * 1.5 + o - colorPenalty
         }
     }
 
