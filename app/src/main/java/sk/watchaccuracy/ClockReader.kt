@@ -30,10 +30,8 @@ object ClockReader {
         val reference = java.util.Calendar.getInstance().apply { timeInMillis = fallbackMillis }
         val referenceHour = reference.get(java.util.Calendar.HOUR_OF_DAY)
         val referenceMinute = reference.get(java.util.Calendar.MINUTE)
-        val referenceSecond = reference.get(java.util.Calendar.SECOND)
         val expectedHourAngle = ((referenceHour % 12) * 30 + referenceMinute * .5).roundToInt()
         val expectedMinuteAngle = referenceMinute * 6
-        val expectedSecondAngle = referenceSecond * 6
 
         fun bestNear(center: Int, radius: Int, klass: Int): Int =
             (-radius..radius).maxBy { delta -> predictions[wrap(center + delta)][klass] }.let { wrap(center + it) }
@@ -43,21 +41,23 @@ object ClockReader {
         var rotation = 0
         var bestScore = -1f
         for (candidateRotation in 0 until 360) {
-            val h = bestNear(expectedHourAngle + candidateRotation, 10, 1)
-            val m = bestNear(expectedMinuteAngle + candidateRotation, 54, 2)
-            val s = bestNear(expectedSecondAngle + candidateRotation, 42, 3)
-            val score = predictions[h][1] + predictions[m][2] + predictions[s][3]
+            val h = bestNear(expectedHourAngle + candidateRotation, 5, 1)
+            val m = bestNear(expectedMinuteAngle + candidateRotation, 15, 2)
+            // Seconds must not influence dial orientation. A stopped or inaccurate
+            // mechanical watch can differ by any number of seconds within the minute.
+            val score = predictions[h][1] + predictions[m][2]
             if (score > bestScore) { bestScore = score; rotation = candidateRotation }
         }
-        val hourImageAngle = bestNear(expectedHourAngle + rotation, 10, 1)
-        val minuteImageAngle = bestNear(expectedMinuteAngle + rotation, 54, 2)
-        val secondImageAngle = bestNear(expectedSecondAngle + rotation, 42, 3)
+        val hourImageAngle = bestNear(expectedHourAngle + rotation, 5, 1)
+        val minuteImageAngle = bestNear(expectedMinuteAngle + rotation, 15, 2)
+        val secondImageAngle = (0 until 360).maxBy { predictions[it][3] }
         val minute = ((wrap(minuteImageAngle - rotation) + 3) / 6) % 60
         val second = ((wrap(secondImageAngle - rotation) + 3) / 6) % 60
         val correctedHourAngle = wrap(hourImageAngle - rotation - (minute * .5).roundToInt())
         var hour = (correctedHourAngle / 30f).roundToInt() % 12
         if (referenceHour >= 12) hour += 12
-        return ReadTime(hour, minute, second, (bestScore / 3f).coerceIn(0f, 1f), layout.layout, layout.confidence)
+        val timeScore = (predictions[hourImageAngle][1] + predictions[minuteImageAngle][2] + predictions[secondImageAngle][3]) / 3f
+        return ReadTime(hour, minute, second, timeScore.coerceIn(0f, 1f), layout.layout, layout.confidence)
     }
 
     private fun radialBands(bitmap: Bitmap): Array<FloatArray> {
