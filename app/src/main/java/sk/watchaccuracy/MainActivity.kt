@@ -116,7 +116,7 @@ private fun WatchAccuracyApp() {
                 is Screen.Camera -> CameraScreen(t, s.shape, shutterPosition, { screen = Screen.Templates(s.watchId) }) { path, at ->
                     val watch = watches.first { it.id == s.watchId }
                     val isGmt = (watch.brand + " " + watch.model).contains("GMT", ignoreCase = true)
-                    val read = ClockReader.read(context, path, at)
+                    val read = ClockReader.read(context, path, at, isKnownGmt = isGmt)
                     screen = Screen.Review(s.watchId, s.shape, path, at, if (isGmt) read.copy(layout = DialLayout.GMT, layoutConfidence = 1f) else read)
                 }
                 is Screen.Review -> ReviewScreen(t, s, { screen = Screen.Camera(s.watchId, s.shape) }) { h, m, sec, layout ->
