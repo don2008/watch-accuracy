@@ -22,7 +22,8 @@ class WatchRepository(context: Context) {
                             id = m.getString("id"), capturedAtMillis = m.getLong("capturedAtMillis"),
                             dialHour = m.getInt("dialHour"), dialMinute = m.getInt("dialMinute"),
                             dialSecond = m.getInt("dialSecond"), photoPath = m.getString("photoPath"),
-                            shape = DialShape.valueOf(m.getString("shape"))
+                            shape = DialShape.valueOf(m.getString("shape")),
+                            layout = runCatching { DialLayout.valueOf(m.optString("layout", "CLASSIC")) }.getOrDefault(DialLayout.CLASSIC)
                         )
                     }
                 )
@@ -37,7 +38,7 @@ class WatchRepository(context: Context) {
             watch.measurements.forEach { m -> measurements.put(JSONObject().apply {
                 put("id", m.id); put("capturedAtMillis", m.capturedAtMillis); put("dialHour", m.dialHour)
                 put("dialMinute", m.dialMinute); put("dialSecond", m.dialSecond); put("photoPath", m.photoPath)
-                put("shape", m.shape.name)
+                put("shape", m.shape.name); put("layout", m.layout.name)
             }) }
             array.put(JSONObject().apply {
                 put("id", watch.id); put("brand", watch.brand); put("model", watch.model); put("measurements", measurements)

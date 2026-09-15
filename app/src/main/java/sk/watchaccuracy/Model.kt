@@ -3,6 +3,7 @@ package sk.watchaccuracy
 import java.util.UUID
 
 enum class DialShape { ROUND, SQUARE, RECTANGLE }
+enum class DialLayout { CLASSIC, SMALL_SECONDS, REGULATOR, JUMP_HOUR }
 enum class AppPalette { CLASSIC, BLUE, MONO }
 
 data class Watch(
@@ -19,7 +20,8 @@ data class Measurement(
     val dialMinute: Int,
     val dialSecond: Int,
     val photoPath: String,
-    val shape: DialShape
+    val shape: DialShape,
+    val layout: DialLayout = DialLayout.CLASSIC
 ) {
     val dialSecondsOfDay: Int get() = (dialHour % 24) * 3600 + dialMinute * 60 + dialSecond
 }

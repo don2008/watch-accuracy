@@ -14,7 +14,9 @@ data class UiText(
     val environment: String, val language: String, val colorCombination: String, val classic: String,
     val blue: String, val monochrome: String, val permissions: String, val camera: String,
     val cameraReason: String, val photos: String, val photosReason: String, val reminders: String,
-    val remindersReason: String, val back: String, val secondsPerDay: String
+    val remindersReason: String, val back: String, val secondsPerDay: String,
+    val layout: String, val detectedLayout: String, val detectionConfidence: String,
+    val layoutClassic: String, val layoutSmallSeconds: String, val layoutRegulator: String, val layoutJumpHour: String
 )
 
 fun uiText(language: String) = if (language == "en") UiText(
@@ -30,7 +32,9 @@ fun uiText(language: String) = if (language == "en") UiText(
     calculatedDeviation="Calculated daily deviation", measurementDate="Measurement date", first="First measurement",
     environment="Interface", language="Language", colorCombination="Color combination", classic="Classic", blue="Blue",
     monochrome="Monochrome", permissions="Permissions", camera="Camera", cameraReason="Required for measurements",
-    photos="Photos", photosReason="Dial images stay inside the app", reminders="Reminders", remindersReason="Reminder for the next measurement", back="Back", secondsPerDay="s/day"
+    photos="Photos", photosReason="Dial images stay inside the app", reminders="Reminders", remindersReason="Reminder for the next measurement", back="Back", secondsPerDay="s/day",
+    layout="Dial layout", detectedLayout="Detected layout", detectionConfidence="Detection confidence",
+    layoutClassic="Classic", layoutSmallSeconds="Small seconds", layoutRegulator="Regulator", layoutJumpHour="Jump hour"
 ) else UiText(
     watches="Hodinky", settings="Nastavenia", addWatch="Pridať hodinky", noWatches="Zatiaľ nemáte uložené žiadne hodinky",
     measurements="meraní", firstMeasurement="prvé meranie", lastDeviation="Posledná denná odchýlka",
@@ -44,7 +48,9 @@ fun uiText(language: String) = if (language == "en") UiText(
     calculatedDeviation="Vypočítaná denná odchýlka", measurementDate="Dátum merania", first="Prvé meranie",
     environment="Prostredie", language="Jazyk", colorCombination="Farebná kombinácia", classic="Klasická", blue="Modrá",
     monochrome="Čiernobiela", permissions="Povolenia", camera="Fotoaparát", cameraReason="Potrebný na nové merania",
-    photos="Fotografie", photosReason="Snímky sa ukladajú iba v aplikácii", reminders="Pripomienky", remindersReason="Pripomenutie ďalšieho merania", back="Späť", secondsPerDay="s/deň"
+    photos="Fotografie", photosReason="Snímky sa ukladajú iba v aplikácii", reminders="Pripomienky", remindersReason="Pripomenutie ďalšieho merania", back="Späť", secondsPerDay="s/deň",
+    layout="Typ ciferníka", detectedLayout="Rozpoznaný typ", detectionConfidence="Istota rozpoznania",
+    layoutClassic="Klasický", layoutSmallSeconds="Malá sekundovka", layoutRegulator="Regulátor", layoutJumpHour="Skoková hodina"
 )
 
 val knownModels = linkedMapOf(

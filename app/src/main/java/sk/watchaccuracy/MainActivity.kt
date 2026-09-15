@@ -96,9 +96,9 @@ private fun WatchAccuracyApp() {
                 }
                 is Screen.WatchDetail -> WatchDetailScreen(t, watches.first { it.id == s.watchId }, { screen = Screen.Watches }, { screen = Screen.Templates(s.watchId) }) { screen = Screen.Record(s.watchId, it) }
                 is Screen.Templates -> TemplateScreen(t, { screen = Screen.WatchDetail(s.watchId) }) { screen = Screen.Camera(s.watchId, it) }
-                is Screen.Camera -> CameraScreen(t, s.shape, { screen = Screen.Templates(s.watchId) }) { path, at -> screen = Screen.Review(s.watchId, s.shape, path, at, ClockReader.read(path, at)) }
-                is Screen.Review -> ReviewScreen(t, s, { screen = Screen.Camera(s.watchId, s.shape) }) { h, m, sec ->
-                    val measurement = Measurement(capturedAtMillis = s.capturedAt, dialHour = h, dialMinute = m, dialSecond = sec, photoPath = s.path, shape = s.shape)
+                is Screen.Camera -> CameraScreen(t, s.shape, { screen = Screen.Templates(s.watchId) }) { path, at -> screen = Screen.Review(s.watchId, s.shape, path, at, ClockReader.read(context, path, at)) }
+                is Screen.Review -> ReviewScreen(t, s, { screen = Screen.Camera(s.watchId, s.shape) }) { h, m, sec, layout ->
+                    val measurement = Measurement(capturedAtMillis = s.capturedAt, dialHour = h, dialMinute = m, dialSecond = sec, photoPath = s.path, shape = s.shape, layout = layout)
                     watches = watches.map { if (it.id == s.watchId) it.copy(measurements = it.measurements + measurement) else it }
                     repo.save(watches); screen = Screen.WatchDetail(s.watchId)
                 }
@@ -224,11 +224,18 @@ private fun latestRate(t: UiText, w: Watch): String {
     Box(modifier.then(dims).border(2.dp, Color(0xFFD1AD68), corner))
 }
 
-@Composable private fun ReviewScreen(t: UiText, s: Screen.Review, retake: () -> Unit, save: (Int, Int, Int) -> Unit) {
+@Composable private fun ReviewScreen(t: UiText, s: Screen.Review, retake: () -> Unit, save: (Int, Int, Int, DialLayout) -> Unit) {
     var h by remember { mutableStateOf(s.read.hour.toString()) }; var m by remember { mutableStateOf(s.read.minute.toString()) }; var sec by remember { mutableStateOf(s.read.second.toString()) }
-    Scaffold(topBar = { AppHeader(t.measurementCheck, t.back, retake) }, bottomBar = { PrimaryBottomButton(t.saveMeasurement, Icons.Default.Check, { save(h.toIntOrNull()?.coerceIn(0,23) ?: 0, m.toIntOrNull()?.coerceIn(0,59) ?: 0, sec.toIntOrNull()?.coerceIn(0,59) ?: 0) }) }) { pad ->
+    var layout by remember { mutableStateOf(s.read.layout) }; var layoutOpen by remember { mutableStateOf(false) }
+    fun layoutName(value: DialLayout) = when (value) { DialLayout.CLASSIC -> t.layoutClassic; DialLayout.SMALL_SECONDS -> t.layoutSmallSeconds; DialLayout.REGULATOR -> t.layoutRegulator; DialLayout.JUMP_HOUR -> t.layoutJumpHour }
+    Scaffold(topBar = { AppHeader(t.measurementCheck, t.back, retake) }, bottomBar = { PrimaryBottomButton(t.saveMeasurement, Icons.Default.Check, { save(h.toIntOrNull()?.coerceIn(0,23) ?: 0, m.toIntOrNull()?.coerceIn(0,59) ?: 0, sec.toIntOrNull()?.coerceIn(0,59) ?: 0, layout) }) }) { pad ->
         Column(Modifier.padding(pad).padding(18.dp)) {
-            Photo(s.path, s.shape); Spacer(Modifier.height(16.dp)); Text(t.photoTime, style = MaterialTheme.typography.labelMedium); Text("${date(s.capturedAt)} · ${clockMillis(s.capturedAt)}", fontSize = 19.sp); HorizontalDivider(Modifier.padding(vertical = 14.dp)); Text(t.dialTime, style = MaterialTheme.typography.labelMedium)
+            Photo(s.path, s.shape); Spacer(Modifier.height(16.dp)); Text(t.photoTime, style = MaterialTheme.typography.labelMedium); Text("${date(s.capturedAt)} · ${clockMillis(s.capturedAt)}", fontSize = 19.sp); HorizontalDivider(Modifier.padding(vertical = 14.dp)); Text(t.detectedLayout, style = MaterialTheme.typography.labelMedium)
+            Box { OutlinedButton(onClick = { layoutOpen = true }, modifier = Modifier.fillMaxWidth()) { Text(layoutName(layout), modifier = Modifier.weight(1f)); Icon(Icons.Default.ArrowDropDown, null) }
+                DropdownMenu(layoutOpen, { layoutOpen = false }) { DialLayout.entries.forEach { value -> DropdownMenuItem({ Text(layoutName(value)) }, { layout = value; layoutOpen = false }) } }
+            }
+            Text("${t.detectionConfidence}: ${(s.read.layoutConfidence * 100).toInt()} %", style = MaterialTheme.typography.bodySmall, color = if (s.read.layoutConfidence < .75f) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary)
+            HorizontalDivider(Modifier.padding(vertical = 14.dp)); Text(t.dialTime, style = MaterialTheme.typography.labelMedium)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { TimeInput(t.hours, h, { h = it }, Modifier.weight(1f)); TimeInput(t.minutes, m, { m = it }, Modifier.weight(1f)); TimeInput(t.seconds, sec, { sec = it }, Modifier.weight(1f)) }
         }
     }
