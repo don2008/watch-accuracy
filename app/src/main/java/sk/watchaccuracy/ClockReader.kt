@@ -19,11 +19,11 @@ data class ReadTime(
 
 /** Offline learned hand classifier. No image or telemetry leaves the phone. */
 object ClockReader {
-    fun read(context: Context, path: String, fallbackMillis: Long): ReadTime {
+    fun read(context: Context, path: String, fallbackMillis: Long, isKnownGmt: Boolean = false): ReadTime {
         val bitmap = BitmapFactory.decodeFile(path) ?: return fallback(fallbackMillis)
         val layout = WatchLayoutClassifier.predict(context, bitmap)
         val model = runCatching { HandModel.load(context) }.getOrNull() ?: return fallback(fallbackMillis)
-        val geometricSecondAngle = thinSecondHandAngle(bitmap)
+        val geometricSecondAngle = thinSecondHandAngle(bitmap, isKnownGmt || layout.layout == DialLayout.GMT)
         val bands = radialBands(bitmap)
         bitmap.recycle()
         val normalized = normalizeAngles(bands)
@@ -121,11 +121,11 @@ object ClockReader {
 
     /** Scores a narrow line that is visible both near the pinion and at the outer
      * minute track. A GMT hand usually ends earlier and has a broad arrow tip. */
-    private fun thinSecondHandAngle(bitmap: Bitmap): Int {
+    private fun thinSecondHandAngle(bitmap: Bitmap, rejectColoredHand: Boolean): Int {
         val cx = bitmap.width / 2.0
         val cy = bitmap.height / 2.0
         val radius = detectDialRadius(bitmap, cx, cy)
-        fun sample(angle: Int, r: Double): Pair<Double, Double> {
+        fun sample(angle: Int, r: Double): DoubleArray {
             val rad = wrap(angle) * PI / 180.0 - PI / 2
             val x = (cx + cos(rad) * r).roundToInt().coerceIn(0, bitmap.width - 1)
             val y = (cy + sin(rad) * r).roundToInt().coerceIn(0, bitmap.height - 1)
@@ -133,25 +133,32 @@ object ClockReader {
             val red = Color.red(p); val green = Color.green(p); val blue = Color.blue(p)
             val luminance = (red * 30 + green * 59 + blue * 11) / 100.0
             val saturation = maxOf(red, green, blue) - minOf(red, green, blue)
-            return luminance to saturation.toDouble()
+            val redDominance = red - maxOf(green, blue)
+            return doubleArrayOf(luminance, saturation.toDouble(), redDominance.toDouble())
         }
         return (0 until 360).maxBy { angle ->
             var inner = 0.0; var innerCount = 0
             var outer = 0.0; var outerCount = 0
             var saturation = 0.0; var saturationCount = 0
+            var redPixels = 0
             for (ri in (radius * .16).roundToInt()..(radius * .90).roundToInt() step 2) {
                 val here = sample(angle, ri.toDouble())
-                val left = sample(angle - 3, ri.toDouble()).first
-                val right = sample(angle + 3, ri.toDouble()).first
-                val contrast = kotlin.math.abs(here.first - (left + right) / 2.0)
+                val left = sample(angle - 3, ri.toDouble())[0]
+                val right = sample(angle + 3, ri.toDouble())[0]
+                val contrast = kotlin.math.abs(here[0] - (left + right) / 2.0)
                 if (ri < radius * .52) { inner += contrast; innerCount++ }
                 else { outer += contrast; outerCount++ }
-                if (contrast > 8.0) { saturation += here.second; saturationCount++ }
+                if (contrast > 8.0) { saturation += here[1]; saturationCount++ }
+                // On GMT watches the fourth hand is commonly red/orange. Several
+                // red-dominant pixels along the same ray identify that hand even
+                // when dim light makes its average saturation deceptively low.
+                if (ri < radius * .78 && here[2] > 18.0 && here[1] > 24.0) redPixels++
             }
             val i = inner / innerCount.coerceAtLeast(1)
             val o = outer / outerCount.coerceAtLeast(1)
             val colorPenalty = saturation / saturationCount.coerceAtLeast(1) * .35
-            minOf(i, o) * 1.5 + o - colorPenalty
+            if (rejectColoredHand && redPixels >= 3) -1000.0
+            else minOf(i, o) * 1.5 + o - colorPenalty
         }
     }
 
