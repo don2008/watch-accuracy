@@ -111,10 +111,10 @@ private fun WatchAccuracyApp() {
                 }
                 is Screen.WatchDetail -> WatchDetailScreen(t, watches.first { it.id == s.watchId }, { screen = Screen.Watches }, { screen = Screen.Templates(s.watchId) }) { screen = Screen.Record(s.watchId, it) }
                 is Screen.Templates -> TemplateScreen(t, { screen = Screen.WatchDetail(s.watchId) }) { screen = Screen.Camera(s.watchId, it) }
-                is Screen.Camera -> CameraScreen(t, s.shape, { screen = Screen.Templates(s.watchId) }) { path, at ->
+                is Screen.Camera -> CameraScreen(t, s.shape, { screen = Screen.Templates(s.watchId) }) { path, previousPath, at ->
                     val watch = watches.first { it.id == s.watchId }
                     val isGmt = (watch.brand + " " + watch.model).contains("GMT", ignoreCase = true)
-                    val read = ClockReader.read(context, path, at, isKnownGmt = isGmt)
+                    val read = ClockReader.read(context, path, at, previousPath)
                     screen = Screen.Review(s.watchId, s.shape, path, at, if (isGmt) read.copy(layout = DialLayout.GMT, layoutConfidence = 1f) else read)
                 }
                 is Screen.Review -> ReviewScreen(t, s, { screen = Screen.Camera(s.watchId, s.shape) }) { h, m, sec, layout ->
@@ -218,7 +218,7 @@ private fun latestRate(t: UiText, w: Watch): String {
     }
 }
 
-@Composable private fun CameraScreen(t: UiText, shape: DialShape, back: () -> Unit, captured: (String, Long) -> Unit) {
+@Composable private fun CameraScreen(t: UiText, shape: DialShape, back: () -> Unit, captured: (String, String, Long) -> Unit) {
     val context = LocalContext.current; val lifecycle = LocalLifecycleOwner.current
     var imageCapture by remember { mutableStateOf<ImageCapture?>(null) }
     var torchOn by remember { mutableStateOf(false) }
@@ -257,7 +257,26 @@ private fun latestRate(t: UiText, w: Watch): String {
         }
         CameraGuide(shape, Modifier.align(Alignment.Center))
         Text(t.cameraGuide, color = Color.White, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 130.dp))
-        Button(onClick = { val capture = imageCapture ?: return@Button; val at = System.currentTimeMillis(); val file = File(context.filesDir, "dial_${at}.jpg"); capture.takePicture(ImageCapture.OutputFileOptions.Builder(file).build(), ContextCompat.getMainExecutor(context), object : ImageCapture.OnImageSavedCallback { override fun onImageSaved(result: ImageCapture.OutputFileResults) { val cropped = PhotoCropper.cropToTemplate(file.absolutePath, shape); captured(cropped, at) }; override fun onError(exception: ImageCaptureException) {} }) }, modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(24.dp).size(76.dp), shape = CircleShape, colors = ButtonDefaults.buttonColors(containerColor = Color.White)) {}
+        Button(onClick = {
+            val capture = imageCapture ?: return@Button
+            val firstAt = System.currentTimeMillis()
+            val first = File(context.filesDir, "dial_motion_${firstAt}.jpg")
+            capture.takePicture(ImageCapture.OutputFileOptions.Builder(first).build(), ContextCompat.getMainExecutor(context), object : ImageCapture.OnImageSavedCallback {
+                override fun onImageSaved(result: ImageCapture.OutputFileResults) {
+                    val firstCrop = PhotoCropper.cropToTemplate(first.absolutePath, shape)
+                    val at = System.currentTimeMillis()
+                    val second = File(context.filesDir, "dial_${at}.jpg")
+                    capture.takePicture(ImageCapture.OutputFileOptions.Builder(second).build(), ContextCompat.getMainExecutor(context), object : ImageCapture.OnImageSavedCallback {
+                        override fun onImageSaved(result: ImageCapture.OutputFileResults) {
+                            val secondCrop = PhotoCropper.cropToTemplate(second.absolutePath, shape)
+                            captured(secondCrop, firstCrop, at)
+                        }
+                        override fun onError(exception: ImageCaptureException) {}
+                    })
+                }
+                override fun onError(exception: ImageCaptureException) {}
+            })
+        }, modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(24.dp).size(76.dp), shape = CircleShape, colors = ButtonDefaults.buttonColors(containerColor = Color.White)) {}
     }
 }
 
