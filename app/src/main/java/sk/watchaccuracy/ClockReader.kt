@@ -27,25 +27,36 @@ object ClockReader {
         bitmap.recycle()
         val normalized = normalizeAngles(bands)
         val predictions = Array(360) { angle -> model.predict(features(normalized, angle)) }
-        val candidates = Array(4) { klass -> (0 until 360).sortedByDescending { predictions[it][klass] }.take(16) }
-        var best: Triple<Int, Int, Int>? = null
+        val reference = java.util.Calendar.getInstance().apply { timeInMillis = fallbackMillis }
+        val referenceHour = reference.get(java.util.Calendar.HOUR_OF_DAY)
+        val referenceMinute = reference.get(java.util.Calendar.MINUTE)
+        val referenceSecond = reference.get(java.util.Calendar.SECOND)
+        val expectedHourAngle = ((referenceHour % 12) * 30 + referenceMinute * .5).roundToInt()
+        val expectedMinuteAngle = referenceMinute * 6
+        val expectedSecondAngle = referenceSecond * 6
+
+        fun bestNear(center: Int, radius: Int, klass: Int): Int =
+            (-radius..radius).maxBy { delta -> predictions[wrap(center + delta)][klass] }.let { wrap(center + it) }
+
+        // The watch can be freely rotated on the wrist. Find the rotation which makes
+        // all three ordinary hands agree best with a plausible time near capture time.
+        var rotation = 0
         var bestScore = -1f
-        for (h in candidates[1]) for (m in candidates[2]) for (s in candidates[3]) {
-            // Hands are allowed to overlap. Rejecting close angles caused a complete
-            // detection failure and the old code then displayed the photo timestamp.
-            val overlapPenalty = (if (distance(h, m) < 3) .03f else 0f) +
-                (if (distance(h, s) < 2) .02f else 0f) +
-                (if (distance(m, s) < 2) .02f else 0f)
-            val score = predictions[h][1] + predictions[m][2] + predictions[s][3] - overlapPenalty
-            if (score > bestScore) { bestScore = score; best = Triple(h, m, s) }
+        for (candidateRotation in 0 until 360) {
+            val h = bestNear(expectedHourAngle + candidateRotation, 10, 1)
+            val m = bestNear(expectedMinuteAngle + candidateRotation, 54, 2)
+            val s = bestNear(expectedSecondAngle + candidateRotation, 42, 3)
+            val score = predictions[h][1] + predictions[m][2] + predictions[s][3]
+            if (score > bestScore) { bestScore = score; rotation = candidateRotation }
         }
-        val angles = best ?: return fallback(fallbackMillis)
-        val minute = ((angles.second + 3) / 6) % 60
-        val second = ((angles.third + 3) / 6) % 60
-        val correctedHourAngle = (angles.first - minute * .5 + 360) % 360
-        var hour = (correctedHourAngle / 30).roundToInt() % 12
-        val fallbackHour = java.util.Calendar.getInstance().apply { timeInMillis = fallbackMillis }.get(java.util.Calendar.HOUR_OF_DAY)
-        if (fallbackHour >= 12) hour += 12
+        val hourImageAngle = bestNear(expectedHourAngle + rotation, 10, 1)
+        val minuteImageAngle = bestNear(expectedMinuteAngle + rotation, 54, 2)
+        val secondImageAngle = bestNear(expectedSecondAngle + rotation, 42, 3)
+        val minute = ((wrap(minuteImageAngle - rotation) + 3) / 6) % 60
+        val second = ((wrap(secondImageAngle - rotation) + 3) / 6) % 60
+        val correctedHourAngle = wrap(hourImageAngle - rotation - (minute * .5).roundToInt())
+        var hour = (correctedHourAngle / 30f).roundToInt() % 12
+        if (referenceHour >= 12) hour += 12
         return ReadTime(hour, minute, second, (bestScore / 3f).coerceIn(0f, 1f), layout.layout, layout.confidence)
     }
 
@@ -83,6 +94,7 @@ object ClockReader {
     }
 
     private fun distance(a: Int, b: Int) = minOf(kotlin.math.abs(a-b), 360-kotlin.math.abs(a-b))
+    private fun wrap(angle: Int) = ((angle % 360) + 360) % 360
     private fun fallback(ms: Long): ReadTime = ReadTime(-1, -1, -1, 0f)
 }
 
