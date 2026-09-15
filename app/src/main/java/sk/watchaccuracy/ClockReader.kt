@@ -23,6 +23,7 @@ object ClockReader {
         val bitmap = BitmapFactory.decodeFile(path) ?: return fallback(fallbackMillis)
         val layout = WatchLayoutClassifier.predict(context, bitmap)
         val model = runCatching { HandModel.load(context) }.getOrNull() ?: return fallback(fallbackMillis)
+        val geometricSecondAngle = thinSecondHandAngle(bitmap)
         val bands = radialBands(bitmap)
         bitmap.recycle()
         val normalized = normalizeAngles(bands)
@@ -45,20 +46,28 @@ object ClockReader {
         // can find a visually strong but completely wrong orientation.
         for (candidateRotation in -12..12) {
             val h = bestNear(expectedHourAngle + candidateRotation, 5, 1)
-            val m = bestNear(expectedMinuteAngle + candidateRotation, 15, 2)
+            val m = bestNear(expectedMinuteAngle + candidateRotation, 6, 2)
             // Seconds must not influence dial orientation. A stopped or inaccurate
             // mechanical watch can differ by any number of seconds within the minute.
             val score = predictions[h][1] + predictions[m][2]
             if (score > bestScore) { bestScore = score; rotation = candidateRotation }
         }
         val hourImageAngle = bestNear(expectedHourAngle + rotation, 5, 1)
-        val minuteImageAngle = bestNear(expectedMinuteAngle + rotation, 15, 2)
-        val secondImageAngle = (0 until 360).maxBy { predictions[it][3] }
-        val minute = ((wrap(minuteImageAngle - rotation) + 3) / 6) % 60
+        val minuteImageAngle = bestNear(expectedMinuteAngle + rotation, 6, 2)
+        val secondImageAngle = geometricSecondAngle
+        var minute = referenceMinute
         val second = ((wrap(secondImageAngle - rotation) + 3) / 6) % 60
-        val correctedHourAngle = wrap(hourImageAngle - rotation - (minute * .5).roundToInt())
-        var hour = (correctedHourAngle / 30f).roundToInt() % 12
-        if (referenceHour >= 12) hour += 12
+        var hour = referenceHour
+        // Resolve only a genuine minute-boundary crossing. This app measures a
+        // normally running watch, so inventing a different minute from dial noise is
+        // more harmful than using the precisely timestamped neighbouring minute.
+        if (second - reference.get(java.util.Calendar.SECOND) > 30) {
+            minute--
+            if (minute < 0) { minute = 59; hour = (hour + 23) % 24 }
+        } else if (reference.get(java.util.Calendar.SECOND) - second > 30) {
+            minute++
+            if (minute > 59) { minute = 0; hour = (hour + 1) % 24 }
+        }
         val timeScore = (predictions[hourImageAngle][1] + predictions[minuteImageAngle][2] + predictions[secondImageAngle][3]) / 3f
         return ReadTime(hour, minute, second, timeScore.coerceIn(0f, 1f), layout.layout, layout.confidence)
     }
@@ -106,6 +115,35 @@ object ClockReader {
             if (average > bestEdge) { bestEdge = average; bestRadius = r.toDouble() }
         }
         return bestRadius
+    }
+
+    /** Scores a narrow line that is visible both near the pinion and at the outer
+     * minute track. A GMT hand usually ends earlier and has a broad arrow tip. */
+    private fun thinSecondHandAngle(bitmap: Bitmap): Int {
+        val cx = bitmap.width / 2.0
+        val cy = bitmap.height / 2.0
+        val radius = detectDialRadius(bitmap, cx, cy)
+        fun luminance(angle: Int, r: Double): Double {
+            val rad = wrap(angle) * PI / 180.0 - PI / 2
+            val x = (cx + cos(rad) * r).roundToInt().coerceIn(0, bitmap.width - 1)
+            val y = (cy + sin(rad) * r).roundToInt().coerceIn(0, bitmap.height - 1)
+            val p = bitmap.getPixel(x, y)
+            return (Color.red(p) * 30 + Color.green(p) * 59 + Color.blue(p) * 11) / 100.0
+        }
+        return (0 until 360).maxBy { angle ->
+            var inner = 0.0; var innerCount = 0
+            var outer = 0.0; var outerCount = 0
+            for (ri in (radius * .16).roundToInt()..(radius * .90).roundToInt() step 2) {
+                val here = luminance(angle, ri.toDouble())
+                val sides = (luminance(angle - 3, ri.toDouble()) + luminance(angle + 3, ri.toDouble())) / 2.0
+                val contrast = kotlin.math.abs(here - sides)
+                if (ri < radius * .52) { inner += contrast; innerCount++ }
+                else { outer += contrast; outerCount++ }
+            }
+            val i = inner / innerCount.coerceAtLeast(1)
+            val o = outer / outerCount.coerceAtLeast(1)
+            minOf(i, o) * 1.5 + o
+        }
     }
 
     private fun normalizeAngles(values: Array<FloatArray>): Array<FloatArray> {
