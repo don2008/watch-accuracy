@@ -25,6 +25,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -35,6 +36,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -42,6 +44,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
@@ -51,6 +54,9 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.TimeUnit
+import kotlin.math.PI
+import kotlin.math.atan2
+import kotlin.math.roundToInt
 import android.view.MotionEvent
 import androidx.core.content.ContextCompat
 
@@ -320,7 +326,9 @@ private fun latestRate(t: UiText, w: Watch): String {
         m.toIntOrNull()?.let { it in 0..59 } == true && sec.toIntOrNull()?.let { it in 0..59 } == true
     Scaffold(topBar = { AppHeader(t.measurementCheck, t.back, retake) }, bottomBar = { PrimaryBottomButton(t.saveMeasurement, Icons.Default.Check, { save(h.toInt(), m.toInt(), sec.toInt(), layout) }, validTime) }) { pad ->
         Column(Modifier.padding(pad).padding(18.dp)) {
-            Photo(s.path, s.shape); Spacer(Modifier.height(16.dp)); Text(t.photoTime, style = MaterialTheme.typography.labelMedium); Text("${date(s.capturedAt)} · ${clockMillis(s.capturedAt)}", fontSize = 19.sp); HorizontalDivider(Modifier.padding(vertical = 14.dp)); Text(t.detectedLayout, style = MaterialTheme.typography.labelMedium)
+            Text(t.manualAdjust, style = MaterialTheme.typography.labelMedium)
+            ManualDialPhoto(t, s.path, s.shape, s.capturedAt) { hour, minute, second -> h = hour.toString(); m = minute.toString(); sec = second.toString() }
+            Spacer(Modifier.height(16.dp)); Text(t.photoTime, style = MaterialTheme.typography.labelMedium); Text("${date(s.capturedAt)} · ${clockMillis(s.capturedAt)}", fontSize = 19.sp); HorizontalDivider(Modifier.padding(vertical = 14.dp)); Text(t.detectedLayout, style = MaterialTheme.typography.labelMedium)
             Box { OutlinedButton(onClick = { layoutOpen = true }, modifier = Modifier.fillMaxWidth()) { Text(layoutName(layout), modifier = Modifier.weight(1f)); Icon(Icons.Default.ArrowDropDown, null) }
                 DropdownMenu(layoutOpen, { layoutOpen = false }) { DialLayout.entries.forEach { value -> DropdownMenuItem({ Text(layoutName(value)) }, { layout = value; layoutOpen = false }) } }
             }
@@ -328,6 +336,41 @@ private fun latestRate(t: UiText, w: Watch): String {
             HorizontalDivider(Modifier.padding(vertical = 14.dp)); Text(t.dialTime, style = MaterialTheme.typography.labelMedium)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { TimeInput(t.hours, h, { h = it }, Modifier.weight(1f)); TimeInput(t.minutes, m, { m = it }, Modifier.weight(1f)); TimeInput(t.seconds, sec, { sec = it }, Modifier.weight(1f)) }
         }
+    }
+}
+
+@Composable private fun ManualDialPhoto(t: UiText, path: String, shape: DialShape, capturedAt: Long, result: (Int, Int, Int) -> Unit) {
+    val bitmap = remember(path) { BitmapFactory.decodeFile(path)?.asImageBitmap() }
+    var points by remember(path) { mutableStateOf(emptyList<Offset>()) }
+    val instruction = when (points.size) { 0 -> t.tapCenter; 1 -> t.tapHour; 2 -> t.tapMinute; 3 -> t.tapSecond; else -> "✓" }
+    val photoModifier = when (shape) { DialShape.ROUND -> Modifier.size(245.dp).clip(CircleShape); DialShape.SQUARE -> Modifier.size(245.dp).clip(RoundedCornerShape(18.dp)); DialShape.RECTANGLE -> Modifier.size(174.dp, 260.dp).clip(RoundedCornerShape(15.dp)) }
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(instruction, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(vertical = 8.dp))
+        Box(photoModifier.pointerInput(points.size) { detectTapGestures { tap ->
+            if (points.size < 4) {
+                points = points + tap
+                if (points.size == 4) {
+                    val center = points[0]
+                    fun angle(point: Offset): Double = (atan2((point.x - center.x).toDouble(), (center.y - point.y).toDouble()) * 180.0 / PI + 360.0) % 360.0
+                    val minute = (angle(points[2]) / 6.0).roundToInt() % 60
+                    val second = (angle(points[3]) / 6.0).roundToInt() % 60
+                    val hour12 = (((angle(points[1]) - minute * .5 + 15.0) / 30.0).toInt() + 12) % 12
+                    val referenceHour = Calendar.getInstance().apply { timeInMillis = capturedAt }.get(Calendar.HOUR_OF_DAY)
+                    val hour = listOf(hour12, hour12 + 12).minBy { kotlin.math.abs(it - referenceHour) }
+                    result(hour, minute, second)
+                }
+            }
+        } }) {
+            if (bitmap != null) Image(bitmap, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            Canvas(Modifier.matchParentSize()) {
+                if (points.isNotEmpty()) {
+                    val colors = listOf(Color(0xFFD1AD68), Color(0xFF66BBFF), Color(0xFF66DD88), Color(0xFFFF665F))
+                    points.drop(1).forEachIndexed { index, point -> drawLine(colors[index + 1], points[0], point, 3.dp.toPx()); drawCircle(colors[index + 1], 6.dp.toPx(), point) }
+                    drawCircle(colors[0], 7.dp.toPx(), points[0]); drawCircle(Color.Black, 3.dp.toPx(), points[0])
+                }
+            }
+        }
+        if (points.isNotEmpty()) TextButton(onClick = { points = emptyList() }) { Text(t.resetPoints) }
     }
 }
 
