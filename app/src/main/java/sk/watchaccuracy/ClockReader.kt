@@ -19,9 +19,8 @@ data class ReadTime(
 
 /** Offline learned hand classifier. No image or telemetry leaves the phone. */
 object ClockReader {
-    fun read(context: Context, path: String, fallbackMillis: Long, previousPath: String? = null): ReadTime {
+    fun read(context: Context, path: String, fallbackMillis: Long, isKnownGmt: Boolean = false): ReadTime {
         val bitmap = BitmapFactory.decodeFile(path) ?: return fallback(fallbackMillis)
-        val previousBitmap = previousPath?.let { BitmapFactory.decodeFile(it) }
         val layout = WatchLayoutClassifier.predict(context, bitmap)
         val model = runCatching { HandModel.load(context) }.getOrNull() ?: return fallback(fallbackMillis)
         val bands = radialBands(bitmap)
@@ -53,24 +52,18 @@ object ClockReader {
         }
         val hourImageAngle = bestNear(expectedHourAngle + rotation, 5, 1)
         val minuteImageAngle = bestNear(expectedMinuteAngle + rotation, 6, 2)
-        val secondImageAngle = thinSecondHandAngle(bitmap, previousBitmap, hourImageAngle, minuteImageAngle)
-        previousBitmap?.recycle()
+        val secondImageAngle = thinSecondHandAngle(bitmap, hourImageAngle, minuteImageAngle, isKnownGmt)
         bitmap.recycle()
-        var minute = referenceMinute
-        // A hand immediately before 12 is still on second 59. Rounding would turn
-        // 59.x into 60 and then modulo into the incorrect value 0.
-        val second = wrap(secondImageAngle - rotation) / 6
-        var hour = referenceHour
-        // Resolve only a genuine minute-boundary crossing. This app measures a
-        // normally running watch, so inventing a different minute from dial noise is
-        // more harmful than using the precisely timestamped neighbouring minute.
-        if (second - reference.get(java.util.Calendar.SECOND) > 30) {
-            minute--
-            if (minute < 0) { minute = 59; hour = (hour + 23) % 24 }
-        } else if (reference.get(java.util.Calendar.SECOND) - second > 30) {
-            minute++
-            if (minute > 59) { minute = 0; hour = (hour + 1) % 24 }
-        }
+        val second = ((wrap(secondImageAngle - rotation) / 6.0).roundToInt()) % 60
+        // Read the minute from the detected hand. The capture time is only a search
+        // prior; copying its minute here made a clearly visible 17:21 read as 17:22.
+        val minute = ((wrap(minuteImageAngle - rotation) / 6.0).roundToInt()) % 60
+        val hourAngle = wrap(hourImageAngle - rotation)
+        val hour12 = ((hourAngle - minute * .5 + 15.0) / 30.0).toInt().let { wrap(it * 30) / 30 }
+        val captureHalf = referenceHour / 12
+        var hour = hour12 + captureHalf * 12
+        if (kotlin.math.abs(hour - referenceHour) > 6) hour = if (hour > referenceHour) hour - 12 else hour + 12
+        hour = (hour + 24) % 24
         val timeScore = (predictions[hourImageAngle][1] + predictions[minuteImageAngle][2] + predictions[secondImageAngle][3]) / 3f
         return ReadTime(hour, minute, second, timeScore.coerceIn(0f, 1f), layout.layout, layout.confidence)
     }
@@ -122,7 +115,7 @@ object ClockReader {
 
     /** Scores a narrow line that is visible both near the pinion and at the outer
      * minute track. A GMT hand usually ends earlier and has a broad arrow tip. */
-    private fun thinSecondHandAngle(bitmap: Bitmap, previous: Bitmap?, hourAngle: Int, minuteAngle: Int): Int {
+    private fun thinSecondHandAngle(bitmap: Bitmap, hourAngle: Int, minuteAngle: Int, isKnownGmt: Boolean): Int {
         val cx = bitmap.width / 2.0
         val cy = bitmap.height / 2.0
         val radius = detectDialRadius(bitmap, cx, cy)
@@ -141,7 +134,7 @@ object ClockReader {
             var inner = 0.0; var innerCount = 0
             var outer = 0.0; var outerCount = 0
             var narrow = 0.0; var narrowCount = 0
-            var motion = 0.0; var motionCount = 0
+            var redLine = 0.0; var redCount = 0
             for (ri in (radius * .16).roundToInt()..(radius * .90).roundToInt() step 2) {
                 val here = sample(angle, ri.toDouble())
                 val nearLeft = sample(angle - 1, ri.toDouble())[0]
@@ -153,27 +146,20 @@ object ClockReader {
                 if (ri < radius * .52) { inner += contrast; innerCount++ }
                 else { outer += contrast; outerCount++ }
                 narrow += narrowContrast; narrowCount++
-                if (previous != null && previous.width == bitmap.width && previous.height == bitmap.height) {
-                    val rad = wrap(angle) * PI / 180.0 - PI / 2
-                    val x = (cx + cos(rad) * ri).roundToInt().coerceIn(0, bitmap.width - 1)
-                    val y = (cy + sin(rad) * ri).roundToInt().coerceIn(0, bitmap.height - 1)
-                    val old = previous.getPixel(x, y)
-                    val oldLum = (Color.red(old) * 30 + Color.green(old) * 59 + Color.blue(old) * 11) / 100.0
-                    motion += kotlin.math.abs(here[0] - oldLum)
-                    motionCount++
-                }
+                if (here[2] > 14.0 && here[1] > 20.0) { redLine += here[2]; redCount++ }
             }
             val i = inner / innerCount.coerceAtLeast(1)
             val o = outer / outerCount.coerceAtLeast(1)
             val n = narrow / narrowCount.coerceAtLeast(1)
-            val moving = motion / motionCount.coerceAtLeast(1)
+            val redCoherence = if (redCount >= 3) redLine / redCount else 0.0
             // Hour and minute hands (including their counterweights) are already
             // known. Remove them, then favour a one-pixel-wide line. Colour cannot
             // identify the hand: many GMT watches use a red seconds hand.
             val overlapsOrdinaryHand = listOf(hourAngle, minuteAngle).any {
                 distance(angle, it) <= 9 || distance(angle, wrap(it + 180)) <= 9
             }
-            if (overlapsOrdinaryHand) -1000.0 else minOf(i, o) + o * .7 + n * 1.5 + moving * 3.0
+            if (overlapsOrdinaryHand) -1000.0
+            else minOf(i, o) + o * .7 + n * 2.0 + if (isKnownGmt) redCoherence * .9 else 0.0
         }
     }
 
