@@ -51,4 +51,6 @@ class WatchRepository(context: Context) {
     fun savePalette(value: AppPalette) = prefs.edit().putString("palette", value.name).apply()
     fun language(): String = prefs.getString("language", "sk") ?: "sk"
     fun saveLanguage(value: String) = prefs.edit().putString("language", value).apply()
+    fun shutterPosition(): ShutterPosition = runCatching { ShutterPosition.valueOf(prefs.getString("shutter_position", "CENTER")!!) }.getOrDefault(ShutterPosition.CENTER)
+    fun saveShutterPosition(value: ShutterPosition) = prefs.edit().putString("shutter_position", value.name).apply()
 }
