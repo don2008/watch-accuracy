@@ -111,7 +111,12 @@ private fun WatchAccuracyApp() {
                 }
                 is Screen.WatchDetail -> WatchDetailScreen(t, watches.first { it.id == s.watchId }, { screen = Screen.Watches }, { screen = Screen.Templates(s.watchId) }) { screen = Screen.Record(s.watchId, it) }
                 is Screen.Templates -> TemplateScreen(t, { screen = Screen.WatchDetail(s.watchId) }) { screen = Screen.Camera(s.watchId, it) }
-                is Screen.Camera -> CameraScreen(t, s.shape, { screen = Screen.Templates(s.watchId) }) { path, at -> screen = Screen.Review(s.watchId, s.shape, path, at, ClockReader.read(context, path, at)) }
+                is Screen.Camera -> CameraScreen(t, s.shape, { screen = Screen.Templates(s.watchId) }) { path, at ->
+                    val watch = watches.first { it.id == s.watchId }
+                    val read = ClockReader.read(context, path, at)
+                    val isGmt = (watch.brand + " " + watch.model).contains("GMT", ignoreCase = true)
+                    screen = Screen.Review(s.watchId, s.shape, path, at, if (isGmt) read.copy(layout = DialLayout.GMT, layoutConfidence = 1f) else read)
+                }
                 is Screen.Review -> ReviewScreen(t, s, { screen = Screen.Camera(s.watchId, s.shape) }) { h, m, sec, layout ->
                     val measurement = Measurement(capturedAtMillis = s.capturedAt, dialHour = h, dialMinute = m, dialSecond = sec, photoPath = s.path, shape = s.shape, layout = layout)
                     watches = watches.map { if (it.id == s.watchId) it.copy(measurements = it.measurements + measurement) else it }
@@ -268,7 +273,7 @@ private fun latestRate(t: UiText, w: Watch): String {
 @Composable private fun ReviewScreen(t: UiText, s: Screen.Review, retake: () -> Unit, save: (Int, Int, Int, DialLayout) -> Unit) {
     var h by remember { mutableStateOf(s.read.hour.toString()) }; var m by remember { mutableStateOf(s.read.minute.toString()) }; var sec by remember { mutableStateOf(s.read.second.toString()) }
     var layout by remember { mutableStateOf(s.read.layout) }; var layoutOpen by remember { mutableStateOf(false) }
-    fun layoutName(value: DialLayout) = when (value) { DialLayout.CLASSIC -> t.layoutClassic; DialLayout.SMALL_SECONDS -> t.layoutSmallSeconds; DialLayout.REGULATOR -> t.layoutRegulator; DialLayout.JUMP_HOUR -> t.layoutJumpHour }
+    fun layoutName(value: DialLayout) = when (value) { DialLayout.CLASSIC -> t.layoutClassic; DialLayout.GMT -> t.layoutGmt; DialLayout.SMALL_SECONDS -> t.layoutSmallSeconds; DialLayout.REGULATOR -> t.layoutRegulator; DialLayout.JUMP_HOUR -> t.layoutJumpHour }
     Scaffold(topBar = { AppHeader(t.measurementCheck, t.back, retake) }, bottomBar = { PrimaryBottomButton(t.saveMeasurement, Icons.Default.Check, { save(h.toIntOrNull()?.coerceIn(0,23) ?: 0, m.toIntOrNull()?.coerceIn(0,59) ?: 0, sec.toIntOrNull()?.coerceIn(0,59) ?: 0, layout) }) }) { pad ->
         Column(Modifier.padding(pad).padding(18.dp)) {
             Photo(s.path, s.shape); Spacer(Modifier.height(16.dp)); Text(t.photoTime, style = MaterialTheme.typography.labelMedium); Text("${date(s.capturedAt)} · ${clockMillis(s.capturedAt)}", fontSize = 19.sp); HorizontalDivider(Modifier.padding(vertical = 14.dp)); Text(t.detectedLayout, style = MaterialTheme.typography.labelMedium)

@@ -3,7 +3,7 @@ package sk.watchaccuracy
 import java.util.UUID
 
 enum class DialShape { ROUND, SQUARE, RECTANGLE }
-enum class DialLayout { CLASSIC, SMALL_SECONDS, REGULATOR, JUMP_HOUR }
+enum class DialLayout { CLASSIC, GMT, SMALL_SECONDS, REGULATOR, JUMP_HOUR }
 enum class AppPalette { CLASSIC, BLUE, MONO }
 
 data class Watch(
