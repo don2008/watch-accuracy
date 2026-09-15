@@ -18,7 +18,8 @@ data class UiText(
     val layout: String, val detectedLayout: String, val detectionConfidence: String,
     val layoutClassic: String, val layoutGmt: String, val layoutSmallSeconds: String, val layoutRegulator: String, val layoutJumpHour: String,
     val shutterPosition: String, val left: String, val center: String, val right: String,
-    val manualAdjust: String, val tapCenter: String, val tapHour: String, val tapMinute: String, val tapSecond: String, val resetPoints: String
+    val manualAdjust: String, val tapCenter: String, val tapHour: String, val tapMinute: String, val tapSecond: String, val resetPoints: String,
+    val confirmPoint: String, val dragPoint: String
 )
 
 fun uiText(language: String) = if (language == "en") UiText(
@@ -38,7 +39,8 @@ fun uiText(language: String) = if (language == "en") UiText(
     layout="Dial layout", detectedLayout="Detected layout", detectionConfidence="Dial type confidence",
     layoutClassic="Classic", layoutGmt="GMT / second time zone", layoutSmallSeconds="Small seconds", layoutRegulator="Regulator", layoutJumpHour="Jump hour",
     shutterPosition="Shutter button position", left="Left", center="Center", right="Right",
-    manualAdjust="Precise hand marking", tapCenter="Tap the centre pinion", tapHour="Tap the tip of the hour hand", tapMinute="Tap the tip of the minute hand", tapSecond="Tap the tip of the seconds hand", resetPoints="Mark again"
+    manualAdjust="Precise hand marking", tapCenter="Place the point on the centre pinion", tapHour="Place the point on the hour hand tip", tapMinute="Place the point on the minute hand tip", tapSecond="Place the point on the seconds hand tip", resetPoints="Mark again",
+    confirmPoint="Confirm position", dragPoint="Drag the point for precise placement"
 ) else UiText(
     watches="Hodinky", settings="Nastavenia", addWatch="Pridať hodinky", noWatches="Zatiaľ nemáte uložené žiadne hodinky",
     measurements="meraní", firstMeasurement="prvé meranie", lastDeviation="Posledná denná odchýlka",
@@ -56,7 +58,8 @@ fun uiText(language: String) = if (language == "en") UiText(
     layout="Typ ciferníka", detectedLayout="Rozpoznaný typ", detectionConfidence="Istota rozpoznania typu",
     layoutClassic="Klasický", layoutGmt="GMT / druhé časové pásmo", layoutSmallSeconds="Malá sekundovka", layoutRegulator="Regulátor", layoutJumpHour="Skoková hodina",
     shutterPosition="Poloha tlačidla spúšte", left="Vľavo", center="V strede", right="Vpravo",
-    manualAdjust="Presné označenie ručičiek", tapCenter="Ťuknite na stred osi ručičiek", tapHour="Ťuknite na koniec hodinovej ručičky", tapMinute="Ťuknite na koniec minútovej ručičky", tapSecond="Ťuknite na koniec sekundovej ručičky", resetPoints="Označiť znova"
+    manualAdjust="Presné označenie ručičiek", tapCenter="Umiestnite bod na stred osi ručičiek", tapHour="Umiestnite bod na koniec hodinovej ručičky", tapMinute="Umiestnite bod na koniec minútovej ručičky", tapSecond="Umiestnite bod na koniec sekundovej ručičky", resetPoints="Označiť znova",
+    confirmPoint="Potvrdiť umiestnenie", dragPoint="Bod môžete prstom presne posúvať"
 )
 
 val knownModels = linkedMapOf(
