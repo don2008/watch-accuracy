@@ -5,6 +5,7 @@ import java.util.UUID
 enum class DialShape { ROUND, SQUARE, RECTANGLE }
 enum class DialLayout { CLASSIC, GMT, SMALL_SECONDS, REGULATOR, JUMP_HOUR }
 enum class AppPalette { CLASSIC, BLUE, MONO }
+enum class ShutterPosition { LEFT, CENTER, RIGHT }
 
 data class Watch(
     val id: String = UUID.randomUUID().toString(),
