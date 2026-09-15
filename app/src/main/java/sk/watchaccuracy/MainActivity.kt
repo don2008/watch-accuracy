@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package sk.watchaccuracy
 
 import android.Manifest
@@ -5,6 +7,7 @@ import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
@@ -107,8 +110,9 @@ private fun WatchAccuracyApp() {
         if (watches.isEmpty()) Box(Modifier.fillMaxSize().padding(pad), contentAlignment = Alignment.Center) { Text("Zatiaľ nemáte uložené žiadne hodinky") }
         else LazyColumn(Modifier.padding(pad).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             items(watches) { watch ->
+                val accent = MaterialTheme.colorScheme.secondary
                 Card(Modifier.fillMaxWidth().clickable { open(watch.id) }) { Row(Modifier.padding(15.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Canvas(Modifier.size(54.dp)) { drawCircle(MaterialTheme.colorScheme.secondary, style = Stroke(2.dp.toPx())); drawLine(Color.DarkGray, center, center.copy(y = center.y - 16.dp.toPx()), 2.dp.toPx()); drawLine(Color.DarkGray, center, center.copy(x = center.x + 13.dp.toPx(), y = center.y + 7.dp.toPx()), 2.dp.toPx()) }
+                    Canvas(Modifier.size(54.dp)) { drawCircle(accent, style = Stroke(2.dp.toPx())); drawLine(Color.DarkGray, center, center.copy(y = center.y - 16.dp.toPx()), 2.dp.toPx()); drawLine(Color.DarkGray, center, center.copy(x = center.x + 13.dp.toPx(), y = center.y + 7.dp.toPx()), 2.dp.toPx()) }
                     Column(Modifier.padding(start = 14.dp).weight(1f)) { Text(watch.brand, fontSize = 19.sp); Text("${watch.model} · ${watch.measurements.size} meraní", style = MaterialTheme.typography.bodySmall) }
                     Text(latestRate(watch), color = MaterialTheme.colorScheme.secondary)
                 } }
