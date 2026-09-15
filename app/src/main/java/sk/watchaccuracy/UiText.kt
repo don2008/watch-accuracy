@@ -19,7 +19,8 @@ data class UiText(
     val layoutClassic: String, val layoutGmt: String, val layoutSmallSeconds: String, val layoutRegulator: String, val layoutJumpHour: String,
     val shutterPosition: String, val left: String, val center: String, val right: String,
     val manualAdjust: String, val tapCenter: String, val tapHour: String, val tapMinute: String, val tapSecond: String, val resetPoints: String,
-    val confirmPoint: String, val dragPoint: String
+    val confirmPoint: String, val dragPoint: String, val moreDetails: String, val handSetup: String,
+    val centerPoint: String, val hourHand: String, val minuteHand: String, val secondHand: String
 )
 
 fun uiText(language: String) = if (language == "en") UiText(
@@ -40,7 +41,8 @@ fun uiText(language: String) = if (language == "en") UiText(
     layoutClassic="Classic", layoutGmt="GMT / second time zone", layoutSmallSeconds="Small seconds", layoutRegulator="Regulator", layoutJumpHour="Jump hour",
     shutterPosition="Shutter button position", left="Left", center="Center", right="Right",
     manualAdjust="Precise hand marking", tapCenter="Place the point on the centre pinion", tapHour="Place the point on the hour hand tip", tapMinute="Place the point on the minute hand tip", tapSecond="Place the point on the seconds hand tip", resetPoints="Mark again",
-    confirmPoint="Confirm position", dragPoint="Drag the point for precise placement"
+    confirmPoint="Confirm position", dragPoint="Drag the coloured point to the correct position", moreDetails="More details", handSetup="HAND SETUP",
+    centerPoint="Dial centre", hourHand="Hour hand", minuteHand="Minute hand", secondHand="Seconds hand"
 ) else UiText(
     watches="Hodinky", settings="Nastavenia", addWatch="Pridať hodinky", noWatches="Zatiaľ nemáte uložené žiadne hodinky",
     measurements="meraní", firstMeasurement="prvé meranie", lastDeviation="Posledná denná odchýlka",
@@ -59,7 +61,8 @@ fun uiText(language: String) = if (language == "en") UiText(
     layoutClassic="Klasický", layoutGmt="GMT / druhé časové pásmo", layoutSmallSeconds="Malá sekundovka", layoutRegulator="Regulátor", layoutJumpHour="Skoková hodina",
     shutterPosition="Poloha tlačidla spúšte", left="Vľavo", center="V strede", right="Vpravo",
     manualAdjust="Presné označenie ručičiek", tapCenter="Umiestnite bod na stred osi ručičiek", tapHour="Umiestnite bod na koniec hodinovej ručičky", tapMinute="Umiestnite bod na koniec minútovej ručičky", tapSecond="Umiestnite bod na koniec sekundovej ručičky", resetPoints="Označiť znova",
-    confirmPoint="Potvrdiť umiestnenie", dragPoint="Bod môžete prstom presne posúvať"
+    confirmPoint="Potvrdiť polohu", dragPoint="Posuňte farebný bod do správnej polohy", moreDetails="Ďalšie údaje", handSetup="NASTAVENIE RUČIČIEK",
+    centerPoint="Stred ciferníka", hourHand="Hodinová ručička", minuteHand="Minútová ručička", secondHand="Sekundová ručička"
 )
 
 val knownModels = linkedMapOf(
