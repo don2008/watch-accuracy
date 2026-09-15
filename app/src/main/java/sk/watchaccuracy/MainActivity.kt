@@ -48,6 +48,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -328,54 +329,75 @@ private fun latestRate(t: UiText, w: Watch): String {
     fun layoutName(value: DialLayout) = when (value) { DialLayout.CLASSIC -> t.layoutClassic; DialLayout.GMT -> t.layoutGmt; DialLayout.SMALL_SECONDS -> t.layoutSmallSeconds; DialLayout.REGULATOR -> t.layoutRegulator; DialLayout.JUMP_HOUR -> t.layoutJumpHour }
     val validTime = h.toIntOrNull()?.let { it in 0..23 } == true &&
         m.toIntOrNull()?.let { it in 0..59 } == true && sec.toIntOrNull()?.let { it in 0..59 } == true
-    Scaffold(topBar = { AppHeader(t.measurementCheck, t.back, retake) }, bottomBar = { PrimaryBottomButton(t.saveMeasurement, Icons.Default.Check, { save(h.toInt(), m.toInt(), sec.toInt(), layout) }, validTime) }) { pad ->
-        Column(Modifier.padding(pad).verticalScroll(rememberScrollState()).padding(18.dp).padding(bottom = 12.dp)) {
-            Text(t.manualAdjust, style = MaterialTheme.typography.labelMedium)
+    Scaffold(topBar = { AppHeader(t.measurementCheck, t.back, retake) }) { pad ->
+        Column(Modifier.padding(pad).verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 10.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
             ManualDialPhoto(t, s.path, s.shape, s.capturedAt, m.toIntOrNull() ?: 0, { h = it.toString() }, { m = it.toString() }, { sec = it.toString() })
-            Text(t.dialTime, style = MaterialTheme.typography.labelMedium)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { TimeInput(t.hours, h, { h = it }, Modifier.weight(1f)); TimeInput(t.minutes, m, { m = it }, Modifier.weight(1f)); TimeInput(t.seconds, sec, { sec = it }, Modifier.weight(1f)) }
-            HorizontalDivider(Modifier.padding(vertical = 14.dp)); Text(t.photoTime, style = MaterialTheme.typography.labelMedium); Text("${date(s.capturedAt)} · ${clockMillis(s.capturedAt)}", fontSize = 19.sp); HorizontalDivider(Modifier.padding(vertical = 14.dp)); Text(t.detectedLayout, style = MaterialTheme.typography.labelMedium)
-            Box { OutlinedButton(onClick = { layoutOpen = true }, modifier = Modifier.fillMaxWidth()) { Text(layoutName(layout), modifier = Modifier.weight(1f)); Icon(Icons.Default.ArrowDropDown, null) }
-                DropdownMenu(layoutOpen, { layoutOpen = false }) { DialLayout.entries.forEach { value -> DropdownMenuItem({ Text(layoutName(value)) }, { layout = value; layoutOpen = false }) } }
+            Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(t.dialTime, style = MaterialTheme.typography.titleLarge, fontFamily = FontFamily.Serif)
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) { TimeInput(t.hours, h, { h = it }, Modifier.weight(1f)); TimeInput(t.minutes, m, { m = it }, Modifier.weight(1f)); TimeInput(t.seconds, sec, { sec = it }, Modifier.weight(1f)) }
+                }
             }
-            Text("${t.detectionConfidence}: ${(s.read.layoutConfidence * 100).toInt()} %", style = MaterialTheme.typography.bodySmall, color = if (s.read.layoutConfidence < .75f) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary)
-            Spacer(Modifier.height(12.dp))
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) { Icon(Icons.Default.KeyboardArrowDown, null, tint = MaterialTheme.colorScheme.primary); Text(t.moreDetails, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium) }
+            Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(t.photoTime, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("${date(s.capturedAt)} · ${clockMillis(s.capturedAt)}", fontSize = 19.sp)
+                    HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                    Text(t.detectedLayout, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Box { OutlinedButton(onClick = { layoutOpen = true }, modifier = Modifier.fillMaxWidth()) { Text(layoutName(layout), modifier = Modifier.weight(1f)); Icon(Icons.Default.ArrowDropDown, null) }
+                        DropdownMenu(layoutOpen, { layoutOpen = false }) { DialLayout.entries.forEach { value -> DropdownMenuItem({ Text(layoutName(value)) }, { layout = value; layoutOpen = false }) } }
+                    }
+                    Text("${t.detectionConfidence}: ${(s.read.layoutConfidence * 100).toInt()} %", style = MaterialTheme.typography.bodySmall, color = if (s.read.layoutConfidence < .75f) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary)
+                }
+            }
+            Button(onClick = { save(h.toInt(), m.toInt(), sec.toInt(), layout) }, enabled = validTime, modifier = Modifier.fillMaxWidth().height(58.dp), shape = RoundedCornerShape(18.dp)) { Icon(Icons.Default.Check, null); Spacer(Modifier.width(9.dp)); Text(t.saveMeasurement, fontSize = 17.sp) }
         }
     }
 }
 
 @Composable private fun ManualDialPhoto(t: UiText, path: String, shape: DialShape, capturedAt: Long, currentMinute: Int, setHour: (Int) -> Unit, setMinute: (Int) -> Unit, setSecond: (Int) -> Unit) {
     val bitmap = remember(path) { BitmapFactory.decodeFile(path)?.asImageBitmap() }
-    var confirmed by remember(path) { mutableStateOf(emptyList<Offset>()) }
-    var active by remember(path, confirmed.size) { mutableStateOf<Offset?>(null) }
-    val stage = confirmed.size
-    val instruction = when (stage) { 0 -> t.tapCenter; 1 -> t.tapHour; 2 -> t.tapMinute; 3 -> t.tapSecond; else -> "✓" }
-    val photoModifier = when (shape) { DialShape.ROUND -> Modifier.size(220.dp).clip(CircleShape); DialShape.SQUARE -> Modifier.size(220.dp).clip(RoundedCornerShape(18.dp)); DialShape.RECTANGLE -> Modifier.size(150.dp, 225.dp).clip(RoundedCornerShape(15.dp)) }
+    var center by remember(path) { mutableStateOf<Offset?>(null) }
+    var hands by remember(path) { mutableStateOf(emptyList<Offset>()) }
+    var centerConfirmed by remember(path) { mutableStateOf(false) }
+    var active by remember(path, centerConfirmed, hands.size) { mutableStateOf<Offset?>(null) }
+    val stage = if (!centerConfirmed) 0 else hands.size + 1
+    val instruction = when (stage) { 0 -> t.centerPoint; 1 -> t.hourHand; 2 -> t.minuteHand; 3 -> t.secondHand; else -> "✓" }
+    val photoModifier = when (shape) { DialShape.ROUND -> Modifier.size(230.dp).clip(CircleShape); DialShape.SQUARE -> Modifier.size(230.dp).clip(RoundedCornerShape(18.dp)); DialShape.RECTANGLE -> Modifier.size(154.dp, 231.dp).clip(RoundedCornerShape(15.dp)) }
     fun valueFor(point: Offset) {
-        val center = confirmed.firstOrNull() ?: return
-        val angle = (atan2((point.x - center.x).toDouble(), (center.y - point.y).toDouble()) * 180.0 / PI + 360.0) % 360.0
+        val origin = center ?: return
+        val angle = (atan2((point.x - origin.x).toDouble(), (origin.y - point.y).toDouble()) * 180.0 / PI + 360.0) % 360.0
         when (stage) {
             1 -> { val h12 = (((angle - currentMinute * .5 + 15.0) / 30.0).toInt() + 12) % 12; val ref = Calendar.getInstance().apply { timeInMillis = capturedAt }.get(Calendar.HOUR_OF_DAY); setHour(listOf(h12, h12 + 12).minBy { kotlin.math.abs(it - ref) }) }
             2 -> setMinute((angle / 6.0).roundToInt() % 60)
             3 -> setSecond((angle / 6.0).roundToInt() % 60)
         }
     }
-    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(instruction, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(vertical = 8.dp))
-        if (stage < 4) Text(t.dragPoint, style = MaterialTheme.typography.bodySmall)
-        Box(photoModifier.pointerInput(stage) { awaitEachGesture {
-            val down = awaitFirstDown(); active = down.position; valueFor(down.position)
-            drag(down.id) { change -> active = change.position; valueFor(change.position); change.consume() }
-        } }) {
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text(t.handSetup, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f)); Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.secondaryContainer, border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary)) { Text(if (stage < 4) "${stage + 1} / 4" else "✓", modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), color = MaterialTheme.colorScheme.primary) } }
+        Text(instruction, style = MaterialTheme.typography.headlineSmall, fontFamily = FontFamily.Serif, modifier = Modifier.fillMaxWidth())
+        if (stage < 4) Text(t.dragPoint, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth())
+        val interactivePhoto = if (stage < 4) photoModifier.pointerInput(stage) { awaitEachGesture {
+            val down = awaitFirstDown()
+            if (stage == 0) center = down.position else { active = down.position; valueFor(down.position) }
+            drag(down.id) { change -> if (stage == 0) center = change.position else { active = change.position; valueFor(change.position) }; change.consume() }
+        } } else photoModifier
+        Box(interactivePhoto.onSizeChanged { if (center == null) center = Offset(it.width / 2f, it.height / 2f) }) {
             if (bitmap != null) Image(bitmap, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             Canvas(Modifier.matchParentSize()) {
                 val colors = listOf(Color(0xFFD1AD68), Color(0xFF66BBFF), Color(0xFF66DD88), Color(0xFFFF665F))
-                val shown = confirmed + listOfNotNull(active)
-                shown.drop(1).forEachIndexed { index, point -> drawLine(colors[(index + 1).coerceAtMost(3)], shown[0], point, 3.dp.toPx()); drawCircle(colors[(index + 1).coerceAtMost(3)], 7.dp.toPx(), point) }
-                shown.firstOrNull()?.let { drawCircle(colors[0], 8.dp.toPx(), it); drawCircle(Color.Black, 3.dp.toPx(), it) }
+                val origin = center
+                if (origin != null) {
+                    val shownHands = hands + listOfNotNull(active)
+                    shownHands.forEachIndexed { index, point -> val color = colors[(index + 1).coerceAtMost(3)]; drawLine(color, origin, point, 3.dp.toPx()); drawCircle(Color.White, 9.dp.toPx(), point); drawCircle(color, 7.dp.toPx(), point) }
+                    drawCircle(Color.White, 9.dp.toPx(), origin); drawCircle(colors[0], 7.dp.toPx(), origin); drawCircle(Color.Black, 3.dp.toPx(), origin)
+                }
             }
         }
-        if (stage < 4) Button(onClick = { active?.let { confirmed = confirmed + it } }, enabled = active != null, modifier = Modifier.padding(top = 8.dp)) { Icon(Icons.Default.Check, null); Spacer(Modifier.width(6.dp)); Text(t.confirmPoint) }
+        if (stage < 4) Button(onClick = {
+            if (stage == 0) centerConfirmed = true else active?.let { hands = hands + it }
+        }, enabled = if (stage == 0) center != null else active != null, modifier = Modifier.fillMaxWidth().height(54.dp)) { Icon(Icons.Default.Check, null); Spacer(Modifier.width(8.dp)); Text(t.confirmPoint) }
     }
 }
 
