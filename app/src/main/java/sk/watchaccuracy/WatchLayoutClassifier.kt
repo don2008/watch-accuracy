@@ -4,7 +4,6 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
 import org.json.JSONObject
-import java.util.zip.GZIPInputStream
 import kotlin.math.exp
 import kotlin.math.sqrt
 
@@ -52,7 +51,7 @@ private data class LayoutModel(
 
     companion object {
         fun load(context: Context): LayoutModel {
-            val root = JSONObject(GZIPInputStream(context.assets.open("layout_classifier.json.gz")).bufferedReader().use { it.readText() })
+            val root = JSONObject(context.assets.open("layout_classifier.json").bufferedReader().use { it.readText() })
             fun vector(name: String) = root.getJSONArray(name).let { a -> FloatArray(a.length()) { a.getDouble(it).toFloat() } }
             fun matrix(name: String) = root.getJSONArray(name).let { rows ->
                 Array(rows.length()) { r -> rows.getJSONArray(r).let { row -> FloatArray(row.length()) { row.getDouble(it).toFloat() } } }
