@@ -40,7 +40,10 @@ object ClockReader {
         // all three ordinary hands agree best with a plausible time near capture time.
         var rotation = 0
         var bestScore = -1f
-        for (candidateRotation in 0 until 360) {
+        // The capture guide asks the user to align the 12 marker vertically.
+        // Correct only a small hand-held alignment error; a full 360-degree search
+        // can find a visually strong but completely wrong orientation.
+        for (candidateRotation in -12..12) {
             val h = bestNear(expectedHourAngle + candidateRotation, 5, 1)
             val m = bestNear(expectedMinuteAngle + candidateRotation, 15, 2)
             // Seconds must not influence dial orientation. A stopped or inaccurate

@@ -267,7 +267,26 @@ private fun latestRate(t: UiText, w: Watch): String {
         else -> Modifier.fillMaxWidth(.72f).aspectRatio(1f)
     }
     val corner = when (shape) { DialShape.ROUND -> CircleShape; DialShape.SQUARE -> RoundedCornerShape(34.dp); DialShape.RECTANGLE -> RoundedCornerShape(24.dp) }
-    Box(modifier.then(dims).border(2.dp, Color(0xFFD1AD68), corner))
+    val guideColor = Color(0xFFD1AD68)
+    Box(modifier.then(dims).border(2.dp, guideColor, corner)) {
+        if (shape == DialShape.ROUND) {
+            Canvas(Modifier.fillMaxSize()) {
+                val tick = size.minDimension * .055f
+                val stroke = 2.dp.toPx()
+                drawLine(guideColor, center.copy(y = 0f), center.copy(y = tick), stroke)
+                drawLine(guideColor, center.copy(y = size.height), center.copy(y = size.height - tick), stroke)
+                drawLine(guideColor, center.copy(x = 0f), center.copy(x = tick), stroke)
+                drawLine(guideColor, center.copy(x = size.width), center.copy(x = size.width - tick), stroke)
+                val cross = size.minDimension * .035f
+                drawLine(guideColor, center.copy(x = center.x - cross), center.copy(x = center.x + cross), stroke)
+                drawLine(guideColor, center.copy(y = center.y - cross), center.copy(y = center.y + cross), stroke)
+            }
+            Text("12", color = guideColor, fontSize = 18.sp, modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp).background(Color.Black.copy(alpha = .55f), RoundedCornerShape(6.dp)).padding(horizontal = 7.dp, vertical = 2.dp))
+            Text("3", color = guideColor, modifier = Modifier.align(Alignment.CenterEnd).padding(end = 8.dp))
+            Text("6", color = guideColor, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp))
+            Text("9", color = guideColor, modifier = Modifier.align(Alignment.CenterStart).padding(start = 8.dp))
+        }
+    }
 }
 
 @Composable private fun ReviewScreen(t: UiText, s: Screen.Review, retake: () -> Unit, save: (Int, Int, Int, DialLayout) -> Unit) {
