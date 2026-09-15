@@ -2,7 +2,11 @@ package sk.watchaccuracy
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
 import android.graphics.Matrix
+import android.graphics.Paint
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
 import androidx.exifinterface.media.ExifInterface
 import java.io.File
 import java.io.FileOutputStream
@@ -33,8 +37,22 @@ object PhotoCropper {
         val left = ((upright.width - cropWidth) / 2).coerceAtLeast(0)
         val top = ((upright.height - cropHeight) / 2).coerceAtLeast(0)
         val cropped = Bitmap.createBitmap(upright, left, top, cropWidth.coerceAtMost(upright.width), cropHeight.coerceAtMost(upright.height))
-        val output = File(path.substringBeforeLast('.') + "_dial.jpg")
-        FileOutputStream(output).use { cropped.compress(Bitmap.CompressFormat.JPEG, 94, it) }
+        val finalBitmap = if (shape == DialShape.ROUND) {
+            Bitmap.createBitmap(cropped.width, cropped.height, Bitmap.Config.ARGB_8888).also { masked ->
+                val canvas = Canvas(masked)
+                val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+                canvas.drawCircle(masked.width / 2f, masked.height / 2f, minOf(masked.width, masked.height) / 2f, paint)
+                paint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
+                canvas.drawBitmap(cropped, 0f, 0f, paint)
+                paint.xfermode = null
+            }
+        } else cropped
+        val output = File(path.substringBeforeLast('.') + if (shape == DialShape.ROUND) "_dial.png" else "_dial.jpg")
+        FileOutputStream(output).use { stream ->
+            if (shape == DialShape.ROUND) finalBitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
+            else finalBitmap.compress(Bitmap.CompressFormat.JPEG, 94, stream)
+        }
+        if (finalBitmap !== cropped) finalBitmap.recycle()
         cropped.recycle(); upright.recycle(); File(path).delete()
         return output.absolutePath
     }
