@@ -33,7 +33,7 @@ fun uiText(language: String) = if (language == "en") UiText(
     environment="Interface", language="Language", colorCombination="Color combination", classic="Classic", blue="Blue",
     monochrome="Monochrome", permissions="Permissions", camera="Camera", cameraReason="Required for measurements",
     photos="Photos", photosReason="Dial images stay inside the app", reminders="Reminders", remindersReason="Reminder for the next measurement", back="Back", secondsPerDay="s/day",
-    layout="Dial layout", detectedLayout="Detected layout", detectionConfidence="Detection confidence",
+    layout="Dial layout", detectedLayout="Detected layout", detectionConfidence="Dial type confidence",
     layoutClassic="Classic", layoutGmt="GMT / second time zone", layoutSmallSeconds="Small seconds", layoutRegulator="Regulator", layoutJumpHour="Jump hour"
 ) else UiText(
     watches="Hodinky", settings="Nastavenia", addWatch="Pridať hodinky", noWatches="Zatiaľ nemáte uložené žiadne hodinky",
@@ -49,7 +49,7 @@ fun uiText(language: String) = if (language == "en") UiText(
     environment="Prostredie", language="Jazyk", colorCombination="Farebná kombinácia", classic="Klasická", blue="Modrá",
     monochrome="Čiernobiela", permissions="Povolenia", camera="Fotoaparát", cameraReason="Potrebný na nové merania",
     photos="Fotografie", photosReason="Snímky sa ukladajú iba v aplikácii", reminders="Pripomienky", remindersReason="Pripomenutie ďalšieho merania", back="Späť", secondsPerDay="s/deň",
-    layout="Typ ciferníka", detectedLayout="Rozpoznaný typ", detectionConfidence="Istota rozpoznania",
+    layout="Typ ciferníka", detectedLayout="Rozpoznaný typ", detectionConfidence="Istota rozpoznania typu",
     layoutClassic="Klasický", layoutGmt="GMT / druhé časové pásmo", layoutSmallSeconds="Malá sekundovka", layoutRegulator="Regulátor", layoutJumpHour="Skoková hodina"
 )
 
