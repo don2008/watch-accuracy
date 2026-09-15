@@ -31,8 +31,12 @@ object ClockReader {
         var best: Triple<Int, Int, Int>? = null
         var bestScore = -1f
         for (h in candidates[1]) for (m in candidates[2]) for (s in candidates[3]) {
-            if (distance(h, m) < 7 || distance(h, s) < 5 || distance(m, s) < 5) continue
-            val score = predictions[h][1] + predictions[m][2] + predictions[s][3]
+            // Hands are allowed to overlap. Rejecting close angles caused a complete
+            // detection failure and the old code then displayed the photo timestamp.
+            val overlapPenalty = (if (distance(h, m) < 3) .03f else 0f) +
+                (if (distance(h, s) < 2) .02f else 0f) +
+                (if (distance(m, s) < 2) .02f else 0f)
+            val score = predictions[h][1] + predictions[m][2] + predictions[s][3] - overlapPenalty
             if (score > bestScore) { bestScore = score; best = Triple(h, m, s) }
         }
         val angles = best ?: return fallback(fallbackMillis)
@@ -79,7 +83,7 @@ object ClockReader {
     }
 
     private fun distance(a: Int, b: Int) = minOf(kotlin.math.abs(a-b), 360-kotlin.math.abs(a-b))
-    private fun fallback(ms: Long): ReadTime { val c = java.util.Calendar.getInstance().apply { timeInMillis = ms }; return ReadTime(c.get(java.util.Calendar.HOUR_OF_DAY), c.get(java.util.Calendar.MINUTE), c.get(java.util.Calendar.SECOND), 0f) }
+    private fun fallback(ms: Long): ReadTime = ReadTime(-1, -1, -1, 0f)
 }
 
 private data class HandModel(val mean: FloatArray, val std: FloatArray, val w1: Array<FloatArray>, val b1: FloatArray, val w2: Array<FloatArray>, val b2: FloatArray) {

@@ -271,10 +271,12 @@ private fun latestRate(t: UiText, w: Watch): String {
 }
 
 @Composable private fun ReviewScreen(t: UiText, s: Screen.Review, retake: () -> Unit, save: (Int, Int, Int, DialLayout) -> Unit) {
-    var h by remember { mutableStateOf(s.read.hour.toString()) }; var m by remember { mutableStateOf(s.read.minute.toString()) }; var sec by remember { mutableStateOf(s.read.second.toString()) }
+    var h by remember { mutableStateOf(s.read.hour.takeIf { it >= 0 }?.toString().orEmpty()) }; var m by remember { mutableStateOf(s.read.minute.takeIf { it >= 0 }?.toString().orEmpty()) }; var sec by remember { mutableStateOf(s.read.second.takeIf { it >= 0 }?.toString().orEmpty()) }
     var layout by remember { mutableStateOf(s.read.layout) }; var layoutOpen by remember { mutableStateOf(false) }
     fun layoutName(value: DialLayout) = when (value) { DialLayout.CLASSIC -> t.layoutClassic; DialLayout.GMT -> t.layoutGmt; DialLayout.SMALL_SECONDS -> t.layoutSmallSeconds; DialLayout.REGULATOR -> t.layoutRegulator; DialLayout.JUMP_HOUR -> t.layoutJumpHour }
-    Scaffold(topBar = { AppHeader(t.measurementCheck, t.back, retake) }, bottomBar = { PrimaryBottomButton(t.saveMeasurement, Icons.Default.Check, { save(h.toIntOrNull()?.coerceIn(0,23) ?: 0, m.toIntOrNull()?.coerceIn(0,59) ?: 0, sec.toIntOrNull()?.coerceIn(0,59) ?: 0, layout) }) }) { pad ->
+    val validTime = h.toIntOrNull()?.let { it in 0..23 } == true &&
+        m.toIntOrNull()?.let { it in 0..59 } == true && sec.toIntOrNull()?.let { it in 0..59 } == true
+    Scaffold(topBar = { AppHeader(t.measurementCheck, t.back, retake) }, bottomBar = { PrimaryBottomButton(t.saveMeasurement, Icons.Default.Check, { save(h.toInt(), m.toInt(), sec.toInt(), layout) }, validTime) }) { pad ->
         Column(Modifier.padding(pad).padding(18.dp)) {
             Photo(s.path, s.shape); Spacer(Modifier.height(16.dp)); Text(t.photoTime, style = MaterialTheme.typography.labelMedium); Text("${date(s.capturedAt)} · ${clockMillis(s.capturedAt)}", fontSize = 19.sp); HorizontalDivider(Modifier.padding(vertical = 14.dp)); Text(t.detectedLayout, style = MaterialTheme.typography.labelMedium)
             Box { OutlinedButton(onClick = { layoutOpen = true }, modifier = Modifier.fillMaxWidth()) { Text(layoutName(layout), modifier = Modifier.weight(1f)); Icon(Icons.Default.ArrowDropDown, null) }
