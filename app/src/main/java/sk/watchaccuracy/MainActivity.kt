@@ -6,6 +6,7 @@ import android.Manifest
 import android.app.Activity
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
+import android.media.MediaActionSound
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -79,6 +80,7 @@ private fun WatchAccuracyApp() {
     var screen by remember { mutableStateOf<Screen>(Screen.Watches) }
     var palette by remember { mutableStateOf(repo.palette()) }
     var language by remember { mutableStateOf(repo.language()) }
+    var shutterPosition by remember { mutableStateOf(repo.shutterPosition()) }
     val t = uiText(language)
     val colors = when (palette) {
         AppPalette.CLASSIC -> darkColorScheme(
@@ -111,10 +113,10 @@ private fun WatchAccuracyApp() {
                 }
                 is Screen.WatchDetail -> WatchDetailScreen(t, watches.first { it.id == s.watchId }, { screen = Screen.Watches }, { screen = Screen.Templates(s.watchId) }) { screen = Screen.Record(s.watchId, it) }
                 is Screen.Templates -> TemplateScreen(t, { screen = Screen.WatchDetail(s.watchId) }) { screen = Screen.Camera(s.watchId, it) }
-                is Screen.Camera -> CameraScreen(t, s.shape, { screen = Screen.Templates(s.watchId) }) { path, previousPath, at ->
+                is Screen.Camera -> CameraScreen(t, s.shape, shutterPosition, { screen = Screen.Templates(s.watchId) }) { path, at ->
                     val watch = watches.first { it.id == s.watchId }
                     val isGmt = (watch.brand + " " + watch.model).contains("GMT", ignoreCase = true)
-                    val read = ClockReader.read(context, path, at, previousPath)
+                    val read = ClockReader.read(context, path, at)
                     screen = Screen.Review(s.watchId, s.shape, path, at, if (isGmt) read.copy(layout = DialLayout.GMT, layoutConfidence = 1f) else read)
                 }
                 is Screen.Review -> ReviewScreen(t, s, { screen = Screen.Camera(s.watchId, s.shape) }) { h, m, sec, layout ->
@@ -123,7 +125,7 @@ private fun WatchAccuracyApp() {
                     repo.save(watches); screen = Screen.WatchDetail(s.watchId)
                 }
                 is Screen.Record -> RecordScreen(t, watches.first { it.id == s.watchId }, s.measurementId) { screen = Screen.WatchDetail(s.watchId) }
-                Screen.Settings -> SettingsScreen(t, palette, { palette = it; repo.savePalette(it) }, language, { language = it; repo.saveLanguage(it) }) { screen = Screen.Watches }
+                Screen.Settings -> SettingsScreen(t, palette, { palette = it; repo.savePalette(it) }, language, { language = it; repo.saveLanguage(it) }, shutterPosition, { shutterPosition = it; repo.saveShutterPosition(it) }) { screen = Screen.Watches }
             }
         }
     }
@@ -218,11 +220,14 @@ private fun latestRate(t: UiText, w: Watch): String {
     }
 }
 
-@Composable private fun CameraScreen(t: UiText, shape: DialShape, back: () -> Unit, captured: (String, String, Long) -> Unit) {
+@Composable private fun CameraScreen(t: UiText, shape: DialShape, shutterPosition: ShutterPosition, back: () -> Unit, captured: (String, Long) -> Unit) {
     val context = LocalContext.current; val lifecycle = LocalLifecycleOwner.current
     var imageCapture by remember { mutableStateOf<ImageCapture?>(null) }
     var torchOn by remember { mutableStateOf(false) }
     var boundCamera by remember { mutableStateOf<androidx.camera.core.Camera?>(null) }
+    var capturing by remember { mutableStateOf(false) }
+    val shutterSound = remember { MediaActionSound().apply { load(MediaActionSound.SHUTTER_CLICK) } }
+    DisposableEffect(Unit) { onDispose { shutterSound.release() } }
     var permitted by remember { mutableStateOf(context.checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) }
     val request = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { permitted = it }
     LaunchedEffect(Unit) { if (!permitted) request.launch(Manifest.permission.CAMERA) }
@@ -257,26 +262,25 @@ private fun latestRate(t: UiText, w: Watch): String {
         }
         CameraGuide(shape, Modifier.align(Alignment.Center))
         Text(t.cameraGuide, color = Color.White, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 130.dp))
-        Button(onClick = {
+        Button(enabled = !capturing, onClick = {
             val capture = imageCapture ?: return@Button
-            val firstAt = System.currentTimeMillis()
-            val first = File(context.filesDir, "dial_motion_${firstAt}.jpg")
-            capture.takePicture(ImageCapture.OutputFileOptions.Builder(first).build(), ContextCompat.getMainExecutor(context), object : ImageCapture.OnImageSavedCallback {
+            capturing = true
+            shutterSound.play(MediaActionSound.SHUTTER_CLICK)
+            val requestedAt = System.currentTimeMillis()
+            val file = File(context.filesDir, "dial_${requestedAt}.jpg")
+            capture.takePicture(ImageCapture.OutputFileOptions.Builder(file).build(), ContextCompat.getMainExecutor(context), object : ImageCapture.OnImageSavedCallback {
                 override fun onImageSaved(result: ImageCapture.OutputFileResults) {
-                    val firstCrop = PhotoCropper.cropToTemplate(first.absolutePath, shape)
-                    val at = System.currentTimeMillis()
-                    val second = File(context.filesDir, "dial_${at}.jpg")
-                    capture.takePicture(ImageCapture.OutputFileOptions.Builder(second).build(), ContextCompat.getMainExecutor(context), object : ImageCapture.OnImageSavedCallback {
-                        override fun onImageSaved(result: ImageCapture.OutputFileResults) {
-                            val secondCrop = PhotoCropper.cropToTemplate(second.absolutePath, shape)
-                            captured(secondCrop, firstCrop, at)
-                        }
-                        override fun onError(exception: ImageCaptureException) {}
-                    })
+                    val completedAt = System.currentTimeMillis()
+                    // With the low-latency capture mode exposure lies between the
+                    // request and JPEG completion. The midpoint avoids assigning the
+                    // long JPEG-processing delay to the photographed hand position.
+                    val exposureAt = requestedAt + (completedAt - requestedAt) / 2
+                    val cropped = PhotoCropper.cropToTemplate(file.absolutePath, shape)
+                    captured(cropped, exposureAt)
                 }
-                override fun onError(exception: ImageCaptureException) {}
+                override fun onError(exception: ImageCaptureException) { capturing = false }
             })
-        }, modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(24.dp).size(76.dp), shape = CircleShape, colors = ButtonDefaults.buttonColors(containerColor = Color.White)) {}
+        }, modifier = Modifier.align(when (shutterPosition) { ShutterPosition.LEFT -> Alignment.BottomStart; ShutterPosition.CENTER -> Alignment.BottomCenter; ShutterPosition.RIGHT -> Alignment.BottomEnd }).navigationBarsPadding().padding(24.dp).size(76.dp), shape = CircleShape, colors = ButtonDefaults.buttonColors(containerColor = Color.White)) {}
     }
 }
 
@@ -349,12 +353,14 @@ private fun latestRate(t: UiText, w: Watch): String {
 @Composable private fun DataRow(label: String, value: String) { Row(Modifier.fillMaxWidth().padding(vertical = 14.dp)) { Text(label, Modifier.weight(1f)); Text(value) }; HorizontalDivider() }
 
 @OptIn(ExperimentalMaterial3Api::class)
-@Composable private fun SettingsScreen(t: UiText, palette: AppPalette, setPalette: (AppPalette) -> Unit, language: String, setLanguage: (String) -> Unit, back: () -> Unit) {
+@Composable private fun SettingsScreen(t: UiText, palette: AppPalette, setPalette: (AppPalette) -> Unit, language: String, setLanguage: (String) -> Unit, shutterPosition: ShutterPosition, setShutterPosition: (ShutterPosition) -> Unit, back: () -> Unit) {
     var lang by remember { mutableStateOf(language) }
     Scaffold(topBar = { AppHeader(t.settings, t.back, back) }) { pad -> Column(Modifier.padding(pad).padding(20.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
         Text(t.environment, style = MaterialTheme.typography.labelMedium); Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.Language, null); Text(t.language, Modifier.padding(start = 12.dp).weight(1f)); SingleChoiceSegmentedButtonRow { listOf("sk" to "Slovenčina", "en" to "English").forEachIndexed { i, pair -> SegmentedButton(selected = lang == pair.first, onClick = { lang = pair.first; setLanguage(pair.first) }, shape = SegmentedButtonDefaults.itemShape(i,2)) { Text(pair.second) } } } }
         Text(t.colorCombination, style = MaterialTheme.typography.labelMedium)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) { AppPalette.entries.forEach { p -> PaletteChoice(t, p, palette == p, { setPalette(p) }, Modifier.weight(1f)) } }
+        Text(t.shutterPosition, style = MaterialTheme.typography.labelMedium)
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) { ShutterPosition.entries.forEachIndexed { i, position -> SegmentedButton(selected = shutterPosition == position, onClick = { setShutterPosition(position) }, shape = SegmentedButtonDefaults.itemShape(i, ShutterPosition.entries.size), modifier = Modifier.weight(1f)) { Text(when (position) { ShutterPosition.LEFT -> t.left; ShutterPosition.CENTER -> t.center; ShutterPosition.RIGHT -> t.right }) } } }
         Text(t.permissions, style = MaterialTheme.typography.labelMedium); PermissionRow(Icons.Default.CameraAlt, t.camera, t.cameraReason, true); PermissionRow(Icons.Default.Photo, t.photos, t.photosReason, true); PermissionRow(Icons.Default.Notifications, t.reminders, t.remindersReason, false)
     } }
 }
