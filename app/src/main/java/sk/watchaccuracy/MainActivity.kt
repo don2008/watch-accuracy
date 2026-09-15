@@ -37,6 +37,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -197,18 +198,19 @@ private fun latestRate(t: UiText, w: Watch): String {
 @Composable private fun CameraScreen(t: UiText, shape: DialShape, back: () -> Unit, captured: (String, Long) -> Unit) {
     val context = LocalContext.current; val lifecycle = LocalLifecycleOwner.current
     var imageCapture by remember { mutableStateOf<ImageCapture?>(null) }
-    var flashOn by remember { mutableStateOf(false) }
+    var torchOn by remember { mutableStateOf(false) }
+    var boundCamera by remember { mutableStateOf<androidx.camera.core.Camera?>(null) }
     var permitted by remember { mutableStateOf(context.checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) }
     val request = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { permitted = it }
     LaunchedEffect(Unit) { if (!permitted) request.launch(Manifest.permission.CAMERA) }
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         if (permitted) androidx.compose.ui.viewinterop.AndroidView(factory = { ctx -> PreviewView(ctx).also { view ->
             val future = ProcessCameraProvider.getInstance(ctx)
-            future.addListener({ val provider = future.get(); val preview = Preview.Builder().build().also { it.surfaceProvider = view.surfaceProvider }; imageCapture = ImageCapture.Builder().setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY).setFlashMode(if (flashOn) ImageCapture.FLASH_MODE_ON else ImageCapture.FLASH_MODE_OFF).build(); provider.unbindAll(); provider.bindToLifecycle(lifecycle, CameraSelector.DEFAULT_BACK_CAMERA, preview, imageCapture) }, ContextCompat.getMainExecutor(ctx))
+            future.addListener({ val provider = future.get(); val preview = Preview.Builder().build().also { it.surfaceProvider = view.surfaceProvider }; imageCapture = ImageCapture.Builder().setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY).setFlashMode(ImageCapture.FLASH_MODE_OFF).build(); provider.unbindAll(); boundCamera = provider.bindToLifecycle(lifecycle, CameraSelector.DEFAULT_BACK_CAMERA, preview, imageCapture) }, ContextCompat.getMainExecutor(ctx))
         } }, modifier = Modifier.fillMaxSize()) else Text(t.cameraPermission, color = Color.White, modifier = Modifier.align(Alignment.Center))
         Row(Modifier.align(Alignment.TopCenter).fillMaxWidth().statusBarsPadding().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
             IconButton(back, Modifier.background(Color.Black.copy(alpha=.45f), CircleShape)) { Icon(Icons.Default.Close, t.close, tint = Color.White) }
-            IconButton({ flashOn = !flashOn; imageCapture?.flashMode = if (flashOn) ImageCapture.FLASH_MODE_ON else ImageCapture.FLASH_MODE_OFF }, Modifier.background(Color.Black.copy(alpha=.45f), CircleShape)) { Icon(if (flashOn) Icons.Default.FlashOn else Icons.Default.FlashOff, t.flash, tint = if (flashOn) Color(0xFFD1AD68) else Color.White) }
+            IconButton({ torchOn = !torchOn; boundCamera?.cameraControl?.enableTorch(torchOn) }, Modifier.background(Color.Black.copy(alpha=.45f), CircleShape)) { Icon(if (torchOn) Icons.Default.FlashOn else Icons.Default.FlashOff, t.flash, tint = if (torchOn) Color(0xFFD1AD68) else Color.White) }
         }
         CameraGuide(shape, Modifier.align(Alignment.Center))
         Text(t.cameraGuide, color = Color.White, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 130.dp))
@@ -226,18 +228,29 @@ private fun latestRate(t: UiText, w: Watch): String {
     var h by remember { mutableStateOf(s.read.hour.toString()) }; var m by remember { mutableStateOf(s.read.minute.toString()) }; var sec by remember { mutableStateOf(s.read.second.toString()) }
     Scaffold(topBar = { AppHeader(t.measurementCheck, t.back, retake) }, bottomBar = { PrimaryBottomButton(t.saveMeasurement, Icons.Default.Check, { save(h.toIntOrNull()?.coerceIn(0,23) ?: 0, m.toIntOrNull()?.coerceIn(0,59) ?: 0, sec.toIntOrNull()?.coerceIn(0,59) ?: 0) }) }) { pad ->
         Column(Modifier.padding(pad).padding(18.dp)) {
-            Photo(s.path); Spacer(Modifier.height(16.dp)); Text(t.photoTime, style = MaterialTheme.typography.labelMedium); Text("${date(s.capturedAt)} · ${clockMillis(s.capturedAt)}", fontSize = 19.sp); HorizontalDivider(Modifier.padding(vertical = 14.dp)); Text(t.dialTime, style = MaterialTheme.typography.labelMedium)
+            Photo(s.path, s.shape); Spacer(Modifier.height(16.dp)); Text(t.photoTime, style = MaterialTheme.typography.labelMedium); Text("${date(s.capturedAt)} · ${clockMillis(s.capturedAt)}", fontSize = 19.sp); HorizontalDivider(Modifier.padding(vertical = 14.dp)); Text(t.dialTime, style = MaterialTheme.typography.labelMedium)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { TimeInput(t.hours, h, { h = it }, Modifier.weight(1f)); TimeInput(t.minutes, m, { m = it }, Modifier.weight(1f)); TimeInput(t.seconds, sec, { sec = it }, Modifier.weight(1f)) }
         }
     }
 }
 
 @Composable private fun TimeInput(label: String, value: String, change: (String) -> Unit, modifier: Modifier) { OutlinedTextField(value, change, modifier, label = { Text(label) }, singleLine = true) }
-@Composable private fun Photo(path: String) { val bitmap = remember(path) { BitmapFactory.decodeFile(path)?.asImageBitmap() }; if (bitmap != null) Image(bitmap, null, Modifier.fillMaxWidth().height(245.dp), contentScale = ContentScale.Crop) else Box(Modifier.fillMaxWidth().height(245.dp).background(MaterialTheme.colorScheme.surfaceVariant)) }
+@Composable private fun Photo(path: String, shape: DialShape) {
+    val bitmap = remember(path) { BitmapFactory.decodeFile(path)?.asImageBitmap() }
+    val photoModifier = when (shape) {
+        DialShape.ROUND -> Modifier.size(245.dp).clip(CircleShape)
+        DialShape.SQUARE -> Modifier.size(245.dp).clip(RoundedCornerShape(18.dp))
+        DialShape.RECTANGLE -> Modifier.size(174.dp, 260.dp).clip(RoundedCornerShape(15.dp))
+    }
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        if (bitmap != null) Image(bitmap, null, photoModifier, contentScale = ContentScale.Crop)
+        else Box(photoModifier.background(MaterialTheme.colorScheme.surfaceVariant))
+    }
+}
 
 @Composable private fun RecordScreen(t: UiText, watch: Watch, id: String, back: () -> Unit) {
     val m = watch.measurements.first { it.id == id }; val index = watch.measurements.indexOf(m); val rate = if (index > 0) DeviationCalculator.secondsPerDay(watch.measurements[index-1], m) else null
-    Scaffold(topBar = { AppHeader(t.recordDetail, t.back, back) }) { pad -> Column(Modifier.padding(pad).padding(18.dp)) { Photo(m.photoPath); Spacer(Modifier.height(15.dp)); Card(shape = RoundedCornerShape(19.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary), modifier = Modifier.fillMaxWidth()) { Column(Modifier.padding(17.dp)) { Text(t.calculatedDeviation); Text(rate?.let { String.format(Locale.getDefault(), "%+.1f %s", it, t.secondsPerDay) } ?: t.first, fontSize = 28.sp, fontFamily = FontFamily.Serif) } }; DataRow(t.measurementDate, date(m.capturedAtMillis)); DataRow(t.photoTime, clockMillis(m.capturedAtMillis)); DataRow(t.dialTime, dialTime(m)) } }
+    Scaffold(topBar = { AppHeader(t.recordDetail, t.back, back) }) { pad -> Column(Modifier.padding(pad).padding(18.dp)) { Photo(m.photoPath, m.shape); Spacer(Modifier.height(15.dp)); Card(shape = RoundedCornerShape(19.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary), modifier = Modifier.fillMaxWidth()) { Column(Modifier.padding(17.dp)) { Text(t.calculatedDeviation); Text(rate?.let { String.format(Locale.getDefault(), "%+.1f %s", it, t.secondsPerDay) } ?: t.first, fontSize = 28.sp, fontFamily = FontFamily.Serif) } }; DataRow(t.measurementDate, date(m.capturedAtMillis)); DataRow(t.photoTime, clockMillis(m.capturedAtMillis)); DataRow(t.dialTime, dialTime(m)) } }
 }
 
 @Composable private fun DataRow(label: String, value: String) { Row(Modifier.fillMaxWidth().padding(vertical = 14.dp)) { Text(label, Modifier.weight(1f)); Text(value) }; HorizontalDivider() }
