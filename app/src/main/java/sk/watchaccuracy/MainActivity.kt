@@ -9,6 +9,7 @@ import android.graphics.BitmapFactory
 import android.media.MediaActionSound
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -88,11 +89,30 @@ private fun WatchAccuracyApp() {
     val context = LocalContext.current
     val repo = remember { WatchRepository(context) }
     var watches by remember { mutableStateOf(repo.load()) }
-    var screen by remember { mutableStateOf<Screen>(Screen.Watches) }
+    var backStack by remember { mutableStateOf(listOf<Screen>(Screen.Watches)) }
+    val screen = backStack.last()
+    fun navigate(next: Screen) { backStack = backStack + next }
+    fun goBack() { if (backStack.size > 1) backStack = backStack.dropLast(1) }
     var palette by remember { mutableStateOf(repo.palette()) }
     var language by remember { mutableStateOf(repo.language()) }
     var shutterPosition by remember { mutableStateOf(repo.shutterPosition()) }
+    var transferMessage by remember { mutableStateOf<String?>(null) }
     val t = uiText(language)
+    val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+        if (uri != null) transferMessage = if (repo.exportArchive(uri, watches).isSuccess) t.exportSuccess else t.exportError
+    }
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) repo.importArchive(uri).fold(
+            onSuccess = { imported ->
+                val merged = repo.merge(watches, imported)
+                watches = merged
+                repo.save(merged)
+                transferMessage = t.importSuccess
+            },
+            onFailure = { transferMessage = t.importError }
+        )
+    }
+    BackHandler(enabled = backStack.size > 1) { goBack() }
     val colors = when (palette) {
         AppPalette.CLASSIC -> darkColorScheme(
             primary = Color(0xFFD8B568), onPrimary = Color(0xFF17140D),
@@ -118,25 +138,31 @@ private fun WatchAccuracyApp() {
     MaterialTheme(colorScheme = colors) {
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             when (val s = screen) {
-                Screen.Watches -> WatchesScreen(t, watches, { screen = Screen.WatchDetail(it) }, { screen = Screen.AddWatch }, { screen = Screen.Settings })
-                Screen.AddWatch -> AddWatchScreen(t, watches, { screen = Screen.Watches }) { brand, model ->
-                    watches = watches + Watch(brand = brand.trim(), model = model.trim()); repo.save(watches); screen = Screen.Watches
+                Screen.Watches -> WatchesScreen(t, watches, { navigate(Screen.WatchDetail(it)) }, { navigate(Screen.AddWatch) }, { navigate(Screen.Settings) })
+                Screen.AddWatch -> AddWatchScreen(t, watches, ::goBack) { brand, model ->
+                    watches = watches + Watch(brand = brand.trim(), model = model.trim()); repo.save(watches); backStack = listOf(Screen.Watches)
                 }
-                is Screen.WatchDetail -> WatchDetailScreen(t, watches.first { it.id == s.watchId }, { screen = Screen.Watches }, { screen = Screen.Templates(s.watchId) }) { screen = Screen.Record(s.watchId, it) }
-                is Screen.Templates -> TemplateScreen(t, { screen = Screen.WatchDetail(s.watchId) }) { screen = Screen.Camera(s.watchId, it) }
-                is Screen.Camera -> CameraScreen(t, s.shape, shutterPosition, { screen = Screen.Templates(s.watchId) }) { path, at ->
+                is Screen.WatchDetail -> WatchDetailScreen(t, watches.first { it.id == s.watchId }, ::goBack, { navigate(Screen.Templates(s.watchId)) }) { navigate(Screen.Record(s.watchId, it)) }
+                is Screen.Templates -> TemplateScreen(t, ::goBack) { navigate(Screen.Camera(s.watchId, it)) }
+                is Screen.Camera -> CameraScreen(t, s.shape, shutterPosition, ::goBack) { path, at ->
                     val watch = watches.first { it.id == s.watchId }
                     val isGmt = (watch.brand + " " + watch.model).contains("GMT", ignoreCase = true)
                     val read = ClockReader.read(context, path, at, isKnownGmt = isGmt)
-                    screen = Screen.Review(s.watchId, s.shape, path, at, if (isGmt) read.copy(layout = DialLayout.GMT, layoutConfidence = 1f) else read)
+                    navigate(Screen.Review(s.watchId, s.shape, path, at, if (isGmt) read.copy(layout = DialLayout.GMT, layoutConfidence = 1f) else read))
                 }
-                is Screen.Review -> ReviewScreen(t, s, { screen = Screen.Camera(s.watchId, s.shape) }) { h, m, sec, layout ->
+                is Screen.Review -> ReviewScreen(t, s, ::goBack) { h, m, sec, layout ->
                     val measurement = Measurement(capturedAtMillis = s.capturedAt, dialHour = h, dialMinute = m, dialSecond = sec, photoPath = s.path, shape = s.shape, layout = layout)
                     watches = watches.map { if (it.id == s.watchId) it.copy(measurements = it.measurements + measurement) else it }
-                    repo.save(watches); screen = Screen.WatchDetail(s.watchId)
+                    repo.save(watches); backStack = listOf(Screen.Watches, Screen.WatchDetail(s.watchId))
                 }
-                is Screen.Record -> RecordScreen(t, watches.first { it.id == s.watchId }, s.measurementId) { screen = Screen.WatchDetail(s.watchId) }
-                Screen.Settings -> SettingsScreen(t, palette, { palette = it; repo.savePalette(it) }, language, { language = it; repo.saveLanguage(it) }, shutterPosition, { shutterPosition = it; repo.saveShutterPosition(it) }) { screen = Screen.Watches }
+                is Screen.Record -> RecordScreen(t, watches.first { it.id == s.watchId }, s.measurementId, ::goBack)
+                Screen.Settings -> SettingsScreen(
+                    t, palette, { palette = it; repo.savePalette(it) }, language, { language = it; repo.saveLanguage(it) },
+                    shutterPosition, { shutterPosition = it; repo.saveShutterPosition(it) },
+                    { exportLauncher.launch("watch-accuracy-${SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())}.zip") },
+                    { importLauncher.launch(arrayOf("application/zip", "application/octet-stream")) },
+                    transferMessage, { transferMessage = null }, ::goBack
+                )
             }
         }
     }
@@ -331,7 +357,7 @@ private fun latestRate(t: UiText, w: Watch): String {
         m.toIntOrNull()?.let { it in 0..59 } == true && sec.toIntOrNull()?.let { it in 0..59 } == true
     Scaffold(topBar = { AppHeader(t.measurementCheck, t.back, retake) }) { pad ->
         Column(Modifier.padding(pad).verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 10.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-            ManualDialPhoto(t, s.path, s.shape, s.capturedAt, m.toIntOrNull() ?: 0, { h = it.toString() }, { m = it.toString() }, { sec = it.toString() })
+            ManualDialPhoto(t, s.path, s.shape, s.capturedAt, s.read, { h = it.toString() }, { m = it.toString() }, { sec = it.toString() })
             Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(t.dialTime, style = MaterialTheme.typography.titleLarge, fontFamily = FontFamily.Serif)
@@ -356,48 +382,83 @@ private fun latestRate(t: UiText, w: Watch): String {
     }
 }
 
-@Composable private fun ManualDialPhoto(t: UiText, path: String, shape: DialShape, capturedAt: Long, currentMinute: Int, setHour: (Int) -> Unit, setMinute: (Int) -> Unit, setSecond: (Int) -> Unit) {
+@Composable private fun ManualDialPhoto(t: UiText, path: String, shape: DialShape, capturedAt: Long, read: ReadTime, setHour: (Int) -> Unit, setMinute: (Int) -> Unit, setSecond: (Int) -> Unit) {
     val bitmap = remember(path) { BitmapFactory.decodeFile(path)?.asImageBitmap() }
     var center by remember(path) { mutableStateOf<Offset?>(null) }
     var hands by remember(path) { mutableStateOf(emptyList<Offset>()) }
-    var centerConfirmed by remember(path) { mutableStateOf(false) }
-    var active by remember(path, centerConfirmed, hands.size) { mutableStateOf<Offset?>(null) }
-    val stage = if (!centerConfirmed) 0 else hands.size + 1
-    val instruction = when (stage) { 0 -> t.centerPoint; 1 -> t.hourHand; 2 -> t.minuteHand; 3 -> t.secondHand; else -> "✓" }
+    var viewSize by remember(path) { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
+    val latestCenter by rememberUpdatedState(center)
+    val latestHands by rememberUpdatedState(hands)
     val photoModifier = when (shape) { DialShape.ROUND -> Modifier.size(230.dp).clip(CircleShape); DialShape.SQUARE -> Modifier.size(230.dp).clip(RoundedCornerShape(18.dp)); DialShape.RECTANGLE -> Modifier.size(154.dp, 231.dp).clip(RoundedCornerShape(15.dp)) }
-    fun valueFor(point: Offset) {
-        val origin = center ?: return
-        val angle = (atan2((point.x - origin.x).toDouble(), (origin.y - point.y).toDouble()) * 180.0 / PI + 360.0) % 360.0
-        when (stage) {
-            1 -> { val h12 = (((angle - currentMinute * .5 + 15.0) / 30.0).toInt() + 12) % 12; val ref = Calendar.getInstance().apply { timeInMillis = capturedAt }.get(Calendar.HOUR_OF_DAY); setHour(listOf(h12, h12 + 12).minBy { kotlin.math.abs(it - ref) }) }
-            2 -> setMinute((angle / 6.0).roundToInt() % 60)
-            3 -> setSecond((angle / 6.0).roundToInt() % 60)
-        }
+
+    fun angle(origin: Offset, point: Offset) = (atan2((point.x - origin.x).toDouble(), (origin.y - point.y).toDouble()) * 180.0 / PI + 360.0) % 360.0
+    fun updateTime(origin: Offset, points: List<Offset>) {
+        if (points.size != 3) return
+        val minute = (angle(origin, points[1]) / 6.0).roundToInt() % 60
+        val second = (angle(origin, points[2]) / 6.0).roundToInt() % 60
+        val hourAngle = angle(origin, points[0])
+        val h12 = (((hourAngle - minute * .5 + 15.0) / 30.0).toInt() + 12) % 12
+        val reference = Calendar.getInstance().apply { timeInMillis = capturedAt }.get(Calendar.HOUR_OF_DAY)
+        val hour = listOf(h12, h12 + 12).minBy { kotlin.math.abs(it - reference) }
+        setHour(hour); setMinute(minute); setSecond(second)
     }
+    LaunchedEffect(viewSize, read) {
+        if (viewSize.width <= 0 || viewSize.height <= 0 || center != null) return@LaunchedEffect
+        val origin = Offset(viewSize.width * read.centerX, viewSize.height * read.centerY)
+        val minDimension = minOf(viewSize.width, viewSize.height).toFloat()
+        fun endpoint(detected: Int, fallback: Double, length: Float): Offset {
+            val degrees = if (detected >= 0) detected.toDouble() else fallback
+            val radians = degrees * PI / 180.0
+            return Offset((origin.x + kotlin.math.sin(radians) * length).toFloat(), (origin.y - kotlin.math.cos(radians) * length).toFloat())
+        }
+        center = origin
+        hands = listOf(
+            endpoint(read.hourImageAngle, (read.hour % 12) * 30.0 + read.minute * .5, minDimension * .28f),
+            endpoint(read.minuteImageAngle, read.minute * 6.0, minDimension * .38f),
+            endpoint(read.secondImageAngle, read.second * 6.0, minDimension * .42f)
+        )
+    }
+
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text(t.handSetup, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f)); Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.secondaryContainer, border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary)) { Text(if (stage < 4) "${stage + 1} / 4" else "✓", modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), color = MaterialTheme.colorScheme.primary) } }
-        Text(instruction, style = MaterialTheme.typography.headlineSmall, fontFamily = FontFamily.Serif, modifier = Modifier.fillMaxWidth())
-        if (stage < 4) Text(t.dragPoint, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth())
-        val interactivePhoto = if (stage < 4) photoModifier.pointerInput(stage) { awaitEachGesture {
-            val down = awaitFirstDown()
-            if (stage == 0) center = down.position else { active = down.position; valueFor(down.position) }
-            drag(down.id) { change -> if (stage == 0) center = change.position else { active = change.position; valueFor(change.position) }; change.consume() }
-        } } else photoModifier
-        Box(interactivePhoto.onSizeChanged { if (center == null) center = Offset(it.width / 2f, it.height / 2f) }) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(t.handSetup, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+            Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.secondaryContainer, border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary)) { Text("AI", modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), color = MaterialTheme.colorScheme.primary) }
+        }
+        Text(t.aiHandSuggestion, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth())
+        Box(photoModifier.onSizeChanged { viewSize = it }.pointerInput(path, viewSize) {
+            awaitEachGesture {
+                val down = awaitFirstDown()
+                val origin = latestCenter ?: return@awaitEachGesture
+                val points = listOf(origin) + latestHands
+                val selected = points.indices.minByOrNull { (points[it] - down.position).getDistance() } ?: return@awaitEachGesture
+                if ((points[selected] - down.position).getDistance() > 38.dp.toPx()) return@awaitEachGesture
+                drag(down.id) { change ->
+                    val position = Offset(change.position.x.coerceIn(0f, size.width.toFloat()), change.position.y.coerceIn(0f, size.height.toFloat()))
+                    if (selected == 0) {
+                        center = position
+                        updateTime(position, latestHands)
+                    } else {
+                        val changed = latestHands.toMutableList()
+                        if (changed.size == 3) {
+                            changed[selected - 1] = position
+                            hands = changed
+                            updateTime(latestCenter ?: origin, changed)
+                        }
+                    }
+                    change.consume()
+                }
+            }
+        }) {
             if (bitmap != null) Image(bitmap, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             Canvas(Modifier.matchParentSize()) {
                 val colors = listOf(Color(0xFFD1AD68), Color(0xFF66BBFF), Color(0xFF66DD88), Color(0xFFFF665F))
                 val origin = center
                 if (origin != null) {
-                    val shownHands = hands + listOfNotNull(active)
-                    shownHands.forEachIndexed { index, point -> val color = colors[(index + 1).coerceAtMost(3)]; drawLine(color, origin, point, 3.dp.toPx()); drawCircle(Color.White, 9.dp.toPx(), point); drawCircle(color, 7.dp.toPx(), point) }
-                    drawCircle(Color.White, 9.dp.toPx(), origin); drawCircle(colors[0], 7.dp.toPx(), origin); drawCircle(Color.Black, 3.dp.toPx(), origin)
+                    hands.forEachIndexed { index, point -> val color = colors[index + 1]; drawLine(color, origin, point, 3.dp.toPx()); drawCircle(Color.White, 10.dp.toPx(), point); drawCircle(color, 7.dp.toPx(), point) }
+                    drawCircle(Color.White, 10.dp.toPx(), origin); drawCircle(colors[0], 7.dp.toPx(), origin); drawCircle(Color.Black, 3.dp.toPx(), origin)
                 }
             }
         }
-        if (stage < 4) Button(onClick = {
-            if (stage == 0) centerConfirmed = true else active?.let { hands = hands + it }
-        }, enabled = if (stage == 0) center != null else active != null, modifier = Modifier.fillMaxWidth().height(54.dp)) { Icon(Icons.Default.Check, null); Spacer(Modifier.width(8.dp)); Text(t.confirmPoint) }
     }
 }
 
@@ -423,14 +484,21 @@ private fun latestRate(t: UiText, w: Watch): String {
 @Composable private fun DataRow(label: String, value: String) { Row(Modifier.fillMaxWidth().padding(vertical = 14.dp)) { Text(label, Modifier.weight(1f)); Text(value) }; HorizontalDivider() }
 
 @OptIn(ExperimentalMaterial3Api::class)
-@Composable private fun SettingsScreen(t: UiText, palette: AppPalette, setPalette: (AppPalette) -> Unit, language: String, setLanguage: (String) -> Unit, shutterPosition: ShutterPosition, setShutterPosition: (ShutterPosition) -> Unit, back: () -> Unit) {
+@Composable private fun SettingsScreen(t: UiText, palette: AppPalette, setPalette: (AppPalette) -> Unit, language: String, setLanguage: (String) -> Unit, shutterPosition: ShutterPosition, setShutterPosition: (ShutterPosition) -> Unit, exportData: () -> Unit, importData: () -> Unit, transferMessage: String?, clearMessage: () -> Unit, back: () -> Unit) {
     var lang by remember { mutableStateOf(language) }
-    Scaffold(topBar = { AppHeader(t.settings, t.back, back) }) { pad -> Column(Modifier.padding(pad).padding(20.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+    Scaffold(topBar = { AppHeader(t.settings, t.back, back) }) { pad -> Column(Modifier.padding(pad).verticalScroll(rememberScrollState()).padding(20.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
         Text(t.environment, style = MaterialTheme.typography.labelMedium); Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.Language, null); Text(t.language, Modifier.padding(start = 12.dp).weight(1f)); SingleChoiceSegmentedButtonRow { listOf("sk" to "Slovenčina", "en" to "English").forEachIndexed { i, pair -> SegmentedButton(selected = lang == pair.first, onClick = { lang = pair.first; setLanguage(pair.first) }, shape = SegmentedButtonDefaults.itemShape(i,2)) { Text(pair.second) } } } }
         Text(t.colorCombination, style = MaterialTheme.typography.labelMedium)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) { AppPalette.entries.forEach { p -> PaletteChoice(t, p, palette == p, { setPalette(p) }, Modifier.weight(1f)) } }
         Text(t.shutterPosition, style = MaterialTheme.typography.labelMedium)
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) { ShutterPosition.entries.forEachIndexed { i, position -> SegmentedButton(selected = shutterPosition == position, onClick = { setShutterPosition(position) }, shape = SegmentedButtonDefaults.itemShape(i, ShutterPosition.entries.size), modifier = Modifier.weight(1f)) { Text(when (position) { ShutterPosition.LEFT -> t.left; ShutterPosition.CENTER -> t.center; ShutterPosition.RIGHT -> t.right }) } } }
+        Text(t.backup, style = MaterialTheme.typography.labelMedium)
+        Text(t.backupDescription, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            OutlinedButton(exportData, Modifier.weight(1f)) { Icon(Icons.Default.Upload, null); Spacer(Modifier.width(6.dp)); Text(t.exportData) }
+            OutlinedButton(importData, Modifier.weight(1f)) { Icon(Icons.Default.Download, null); Spacer(Modifier.width(6.dp)); Text(t.importData) }
+        }
+        transferMessage?.let { message -> AssistChip(onClick = clearMessage, label = { Text(message) }, leadingIcon = { Icon(Icons.Default.Info, null) }) }
         Text(t.permissions, style = MaterialTheme.typography.labelMedium); PermissionRow(Icons.Default.CameraAlt, t.camera, t.cameraReason, true); PermissionRow(Icons.Default.Photo, t.photos, t.photosReason, true); PermissionRow(Icons.Default.Notifications, t.reminders, t.remindersReason, false)
     } }
 }

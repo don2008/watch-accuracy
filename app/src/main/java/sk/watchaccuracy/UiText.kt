@@ -20,7 +20,10 @@ data class UiText(
     val shutterPosition: String, val left: String, val center: String, val right: String,
     val manualAdjust: String, val tapCenter: String, val tapHour: String, val tapMinute: String, val tapSecond: String, val resetPoints: String,
     val confirmPoint: String, val dragPoint: String, val moreDetails: String, val handSetup: String,
-    val centerPoint: String, val hourHand: String, val minuteHand: String, val secondHand: String
+    val centerPoint: String, val hourHand: String, val minuteHand: String, val secondHand: String,
+    val backup: String, val exportData: String, val importData: String, val backupDescription: String,
+    val exportSuccess: String, val exportError: String, val importSuccess: String, val importError: String,
+    val aiHandSuggestion: String
 )
 
 fun uiText(language: String) = if (language == "en") UiText(
@@ -42,7 +45,10 @@ fun uiText(language: String) = if (language == "en") UiText(
     shutterPosition="Shutter button position", left="Left", center="Center", right="Right",
     manualAdjust="Precise hand marking", tapCenter="Place the point on the centre pinion", tapHour="Place the point on the hour hand tip", tapMinute="Place the point on the minute hand tip", tapSecond="Place the point on the seconds hand tip", resetPoints="Mark again",
     confirmPoint="Confirm position", dragPoint="Drag the coloured point to the correct position", moreDetails="More details", handSetup="HAND SETUP",
-    centerPoint="Dial centre", hourHand="Hour hand", minuteHand="Minute hand", secondHand="Seconds hand"
+    centerPoint="Dial centre", hourHand="Hour hand", minuteHand="Minute hand", secondHand="Seconds hand",
+    backup="Backup", exportData="Export collection", importData="Import collection", backupDescription="Save or restore watches, measurements and dial photos",
+    exportSuccess="Collection exported", exportError="Export failed", importSuccess="Collection imported", importError="The selected backup could not be imported",
+    aiHandSuggestion="Local AI suggested the hand positions. Drag any coloured endpoint to refine it."
 ) else UiText(
     watches="Hodinky", settings="Nastavenia", addWatch="Pridať hodinky", noWatches="Zatiaľ nemáte uložené žiadne hodinky",
     measurements="meraní", firstMeasurement="prvé meranie", lastDeviation="Posledná denná odchýlka",
@@ -62,7 +68,10 @@ fun uiText(language: String) = if (language == "en") UiText(
     shutterPosition="Poloha tlačidla spúšte", left="Vľavo", center="V strede", right="Vpravo",
     manualAdjust="Presné označenie ručičiek", tapCenter="Umiestnite bod na stred osi ručičiek", tapHour="Umiestnite bod na koniec hodinovej ručičky", tapMinute="Umiestnite bod na koniec minútovej ručičky", tapSecond="Umiestnite bod na koniec sekundovej ručičky", resetPoints="Označiť znova",
     confirmPoint="Potvrdiť polohu", dragPoint="Posuňte farebný bod do správnej polohy", moreDetails="Ďalšie údaje", handSetup="NASTAVENIE RUČIČIEK",
-    centerPoint="Stred ciferníka", hourHand="Hodinová ručička", minuteHand="Minútová ručička", secondHand="Sekundová ručička"
+    centerPoint="Stred ciferníka", hourHand="Hodinová ručička", minuteHand="Minútová ručička", secondHand="Sekundová ručička",
+    backup="Záloha", exportData="Exportovať zbierku", importData="Importovať zbierku", backupDescription="Uloženie alebo obnovenie hodiniek, meraní a fotografií ciferníkov",
+    exportSuccess="Zbierka bola exportovaná", exportError="Export sa nepodaril", importSuccess="Zbierka bola importovaná", importError="Vybranú zálohu sa nepodarilo importovať",
+    aiHandSuggestion="Lokálna AI navrhla polohy ručičiek. Každý farebný koncový bod môžete posunúť."
 )
 
 val knownModels = linkedMapOf(

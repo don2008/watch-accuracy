@@ -14,7 +14,9 @@ import kotlin.math.sqrt
 
 data class ReadTime(
     val hour: Int, val minute: Int, val second: Int, val confidence: Float = 0f,
-    val layout: DialLayout = DialLayout.CLASSIC, val layoutConfidence: Float = 0f
+    val layout: DialLayout = DialLayout.CLASSIC, val layoutConfidence: Float = 0f,
+    val hourImageAngle: Int = -1, val minuteImageAngle: Int = -1, val secondImageAngle: Int = -1,
+    val centerX: Float = .5f, val centerY: Float = .5f
 )
 
 /** Offline learned hand classifier. No image or telemetry leaves the phone. */
@@ -65,7 +67,10 @@ object ClockReader {
         if (kotlin.math.abs(hour - referenceHour) > 6) hour = if (hour > referenceHour) hour - 12 else hour + 12
         hour = (hour + 24) % 24
         val timeScore = (predictions[hourImageAngle][1] + predictions[minuteImageAngle][2] + predictions[secondImageAngle][3]) / 3f
-        return ReadTime(hour, minute, second, timeScore.coerceIn(0f, 1f), layout.layout, layout.confidence)
+        return ReadTime(
+            hour, minute, second, timeScore.coerceIn(0f, 1f), layout.layout, layout.confidence,
+            hourImageAngle, minuteImageAngle, secondImageAngle, .5f, .5f
+        )
     }
 
     private fun radialBands(bitmap: Bitmap): Array<FloatArray> {
