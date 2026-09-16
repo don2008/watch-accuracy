@@ -30,9 +30,13 @@ data class Measurement(
 object DeviationCalculator {
     /** Result in seconds gained (+) or lost (-) per 24 hours. */
     fun secondsPerDay(previous: Measurement, current: Measurement): Double? {
-        val realElapsedMs = current.capturedAtMillis - previous.capturedAtMillis
-        if (realElapsedMs <= 0) return null
-        val realElapsedSeconds = realElapsedMs / 1000.0
+        // Dial readings are stored only to whole seconds. Use the same
+        // precision for photo timestamps so hidden milliseconds do not distort
+        // a daily rate extrapolated from an interval shorter than 24 hours.
+        val previousPhotoSecond = previous.capturedAtMillis / 1_000L
+        val currentPhotoSecond = current.capturedAtMillis / 1_000L
+        val realElapsedSeconds = (currentPhotoSecond - previousPhotoSecond).toDouble()
+        if (realElapsedSeconds <= 0.0) return null
         var dialElapsed = (current.dialSecondsOfDay - previous.dialSecondsOfDay).toDouble()
         val expectedDays = realElapsedSeconds / 86_400.0
         val dayTurns = kotlin.math.round(expectedDays).toInt()
