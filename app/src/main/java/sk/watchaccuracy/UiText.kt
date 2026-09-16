@@ -23,7 +23,10 @@ data class UiText(
     val centerPoint: String, val hourHand: String, val minuteHand: String, val secondHand: String,
     val backup: String, val exportData: String, val importData: String, val backupDescription: String,
     val exportSuccess: String, val exportError: String, val importSuccess: String, val importError: String,
-    val aiHandSuggestion: String
+    val aiHandSuggestion: String,
+    val editRecord: String, val deleteRecord: String, val cancel: String, val confirmDelete: String,
+    val confirmDeleteDescription: String, val editWatch: String, val editMeasurement: String,
+    val saveChanges: String, val longPressActions: String
 )
 
 fun uiText(language: String) = if (language == "en") UiText(
@@ -48,7 +51,10 @@ fun uiText(language: String) = if (language == "en") UiText(
     centerPoint="Dial centre", hourHand="Hour hand", minuteHand="Minute hand", secondHand="Seconds hand",
     backup="Backup", exportData="Export collection", importData="Import collection", backupDescription="Save or restore watches, measurements and dial photos",
     exportSuccess="Collection exported", exportError="Export failed", importSuccess="Collection imported", importError="The selected backup could not be imported",
-    aiHandSuggestion="Local AI suggested the hand positions. Drag any coloured endpoint to refine it."
+    aiHandSuggestion="Local AI suggested the hand positions. Drag any coloured endpoint to refine it.",
+    editRecord="Edit", deleteRecord="Delete", cancel="Cancel", confirmDelete="Delete record?",
+    confirmDeleteDescription="Do you really want to permanently delete this record?", editWatch="Edit watch", editMeasurement="Edit measurement",
+    saveChanges="Save changes", longPressActions="Choose what you want to do with this record."
 ) else UiText(
     watches="Hodinky", settings="Nastavenia", addWatch="Pridať hodinky", noWatches="Zatiaľ nemáte uložené žiadne hodinky",
     measurements="meraní", firstMeasurement="prvé meranie", lastDeviation="Posledná denná odchýlka",
@@ -71,7 +77,10 @@ fun uiText(language: String) = if (language == "en") UiText(
     centerPoint="Stred ciferníka", hourHand="Hodinová ručička", minuteHand="Minútová ručička", secondHand="Sekundová ručička",
     backup="Záloha", exportData="Exportovať zbierku", importData="Importovať zbierku", backupDescription="Uloženie alebo obnovenie hodiniek, meraní a fotografií ciferníkov",
     exportSuccess="Zbierka bola exportovaná", exportError="Export sa nepodaril", importSuccess="Zbierka bola importovaná", importError="Vybranú zálohu sa nepodarilo importovať",
-    aiHandSuggestion="Lokálna AI navrhla polohy ručičiek. Každý farebný koncový bod môžete posunúť."
+    aiHandSuggestion="Lokálna AI navrhla polohy ručičiek. Každý farebný koncový bod môžete posunúť.",
+    editRecord="Upraviť", deleteRecord="Vymazať", cancel="Zrušiť", confirmDelete="Vymazať záznam?",
+    confirmDeleteDescription="Naozaj chcete tento záznam natrvalo vymazať?", editWatch="Upraviť hodinky", editMeasurement="Upraviť meranie",
+    saveChanges="Uložiť zmeny", longPressActions="Vyberte, čo chcete s týmto záznamom urobiť."
 )
 
 val knownModels = linkedMapOf(

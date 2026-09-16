@@ -1,4 +1,4 @@
-@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 
 package sk.watchaccuracy
 
@@ -26,6 +26,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.drag
@@ -138,11 +139,19 @@ private fun WatchAccuracyApp() {
     MaterialTheme(colorScheme = colors) {
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             when (val s = screen) {
-                Screen.Watches -> WatchesScreen(t, watches, { navigate(Screen.WatchDetail(it)) }, { navigate(Screen.AddWatch) }, { navigate(Screen.Settings) })
+                Screen.Watches -> WatchesScreen(
+                    t, watches, { navigate(Screen.WatchDetail(it)) }, { navigate(Screen.AddWatch) }, { navigate(Screen.Settings) },
+                    { changed -> watches = watches.map { if (it.id == changed.id) changed else it }; repo.save(watches) },
+                    { removed -> removed.measurements.forEach { File(it.photoPath).delete() }; watches = watches.filterNot { it.id == removed.id }; repo.save(watches) }
+                )
                 Screen.AddWatch -> AddWatchScreen(t, watches, ::goBack) { brand, model ->
                     watches = watches + Watch(brand = brand.trim(), model = model.trim()); repo.save(watches); backStack = listOf(Screen.Watches)
                 }
-                is Screen.WatchDetail -> WatchDetailScreen(t, watches.first { it.id == s.watchId }, ::goBack, { navigate(Screen.Templates(s.watchId)) }) { navigate(Screen.Record(s.watchId, it)) }
+                is Screen.WatchDetail -> WatchDetailScreen(
+                    t, watches.first { it.id == s.watchId }, ::goBack, { navigate(Screen.Templates(s.watchId)) }, { navigate(Screen.Record(s.watchId, it)) },
+                    { changed -> watches = watches.map { watch -> if (watch.id == s.watchId) watch.copy(measurements = watch.measurements.map { if (it.id == changed.id) changed else it }) else watch }; repo.save(watches) },
+                    { removed -> File(removed.photoPath).delete(); watches = watches.map { watch -> if (watch.id == s.watchId) watch.copy(measurements = watch.measurements.filterNot { it.id == removed.id }) else watch }; repo.save(watches) }
+                )
                 is Screen.Templates -> TemplateScreen(t, ::goBack) { navigate(Screen.Camera(s.watchId, it)) }
                 is Screen.Camera -> CameraScreen(t, s.shape, shutterPosition, ::goBack) { path, at ->
                     val watch = watches.first { it.id == s.watchId }
@@ -176,14 +185,17 @@ private fun WatchAccuracyApp() {
     }
 }
 
-@Composable private fun WatchesScreen(t: UiText, watches: List<Watch>, open: (String) -> Unit, add: () -> Unit, settings: () -> Unit) {
+@Composable private fun WatchesScreen(t: UiText, watches: List<Watch>, open: (String) -> Unit, add: () -> Unit, settings: () -> Unit, edit: (Watch) -> Unit, delete: (Watch) -> Unit) {
+    var actionsFor by remember { mutableStateOf<Watch?>(null) }
+    var editFor by remember { mutableStateOf<Watch?>(null) }
+    var deleteFor by remember { mutableStateOf<Watch?>(null) }
     Scaffold(topBar = { AppHeader(t.watches, t.back, action = { IconButton(onClick = settings) { Icon(Icons.Default.Settings, t.settings) } }) }, bottomBar = { PrimaryBottomButton(t.addWatch, Icons.Default.Add, add) }) { pad ->
         if (watches.isEmpty()) Box(Modifier.fillMaxSize().padding(pad), contentAlignment = Alignment.Center) { Text(t.noWatches) }
         else LazyColumn(Modifier.padding(pad).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             items(watches) { watch ->
                 val accent = MaterialTheme.colorScheme.secondary
                 val clockHand = MaterialTheme.colorScheme.onSurface
-                Card(Modifier.fillMaxWidth().border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(20.dp)).clickable { open(watch.id) }, shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) { Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+                Card(Modifier.fillMaxWidth().border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(20.dp)).combinedClickable(onClick = { open(watch.id) }, onLongClick = { actionsFor = watch }), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) { Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
                     Canvas(Modifier.size(58.dp)) { drawCircle(accent, style = Stroke(2.dp.toPx())); drawLine(clockHand, center, center.copy(y = center.y - 17.dp.toPx()), 2.dp.toPx()); drawLine(clockHand, center, center.copy(x = center.x + 14.dp.toPx(), y = center.y + 8.dp.toPx()), 2.dp.toPx()) }
                     Column(Modifier.padding(start = 14.dp).weight(1f)) { Text(watch.brand, fontSize = 19.sp, fontFamily = FontFamily.Serif); Text("${watch.model} · ${watch.measurements.size} ${t.measurements}", style = MaterialTheme.typography.bodySmall) }
                     Text(latestRate(t, watch), color = MaterialTheme.colorScheme.secondary)
@@ -191,6 +203,9 @@ private fun WatchAccuracyApp() {
             }
         }
     }
+    actionsFor?.let { item -> RecordActionsDialog(t, "${item.brand} ${item.model}", { actionsFor = null; editFor = item }, { actionsFor = null; deleteFor = item }) { actionsFor = null } }
+    editFor?.let { item -> EditWatchDialog(t, item, { changed -> edit(changed); editFor = null }) { editFor = null } }
+    deleteFor?.let { item -> ConfirmDeleteDialog(t, "${item.brand} ${item.model}", { delete(item); deleteFor = null }) { deleteFor = null } }
 }
 
 private fun latestRate(t: UiText, w: Watch): String {
@@ -218,24 +233,62 @@ private fun latestRate(t: UiText, w: Watch): String {
     }
 }
 
-@Composable private fun WatchDetailScreen(t: UiText, watch: Watch, back: () -> Unit, newMeasurement: () -> Unit, openRecord: (String) -> Unit) {
+@Composable private fun WatchDetailScreen(t: UiText, watch: Watch, back: () -> Unit, newMeasurement: () -> Unit, openRecord: (String) -> Unit, editMeasurement: (Measurement) -> Unit, deleteMeasurement: (Measurement) -> Unit) {
+    var actionsFor by remember { mutableStateOf<Measurement?>(null) }
+    var editFor by remember { mutableStateOf<Measurement?>(null) }
+    var deleteFor by remember { mutableStateOf<Measurement?>(null) }
     Scaffold(topBar = { AppHeader("${watch.brand} ${watch.model}", t.back, back) }, bottomBar = { PrimaryBottomButton(t.newMeasurement, Icons.Default.CameraAlt, newMeasurement) }) { pad ->
         LazyColumn(Modifier.padding(pad).padding(horizontal = 18.dp)) {
             item { Card(shape = RoundedCornerShape(19.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary), modifier = Modifier.fillMaxWidth()) { Column(Modifier.padding(18.dp)) { Text(t.lastDeviation); Text(latestRate(t, watch), fontSize = 30.sp, fontFamily = FontFamily.Serif) } }; Spacer(Modifier.height(17.dp)); Text(t.measurementHistory, style = MaterialTheme.typography.labelMedium) }
-            items(watch.measurements.reversed()) { m -> MeasurementRow(t, watch, m) { openRecord(m.id) } }
+            items(watch.measurements.reversed()) { m -> MeasurementRow(t, watch, m, { openRecord(m.id) }) { actionsFor = m } }
         }
     }
+    actionsFor?.let { item -> RecordActionsDialog(t, "${date(item.capturedAtMillis)} · ${dialTime(item)}", { actionsFor = null; editFor = item }, { actionsFor = null; deleteFor = item }) { actionsFor = null } }
+    editFor?.let { item -> EditMeasurementDialog(t, item, { changed -> editMeasurement(changed); editFor = null }) { editFor = null } }
+    deleteFor?.let { item -> ConfirmDeleteDialog(t, "${date(item.capturedAtMillis)} · ${dialTime(item)}", { deleteMeasurement(item); deleteFor = null }) { deleteFor = null } }
 }
 
-@Composable private fun MeasurementRow(t: UiText, watch: Watch, measurement: Measurement, open: () -> Unit) {
+@Composable private fun MeasurementRow(t: UiText, watch: Watch, measurement: Measurement, open: () -> Unit, actions: () -> Unit) {
     val index = watch.measurements.indexOfFirst { it.id == measurement.id }
     val rate = if (index > 0) DeviationCalculator.secondsPerDay(watch.measurements[index - 1], measurement)?.let { String.format(Locale.getDefault(), "%+.1f", it) } ?: "—" else "—"
     val accent = MaterialTheme.colorScheme.primary; val hand = MaterialTheme.colorScheme.onSurface
-    Row(Modifier.fillMaxWidth().clickable(onClick = open).padding(vertical = 15.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().combinedClickable(onClick = open, onLongClick = actions).padding(vertical = 15.dp), verticalAlignment = Alignment.CenterVertically) {
         Canvas(Modifier.size(42.dp)) { drawCircle(accent, style = Stroke(1.8.dp.toPx())); drawLine(hand, center, center.copy(y = center.y - 11.dp.toPx()), 1.6.dp.toPx()); drawLine(hand, center, center.copy(x = center.x + 9.dp.toPx(), y = center.y + 5.dp.toPx()), 1.6.dp.toPx()) }
         Column(Modifier.padding(start = 13.dp).weight(1f)) { Text(date(measurement.capturedAtMillis)); Text("${t.photo} ${clock(measurement.capturedAtMillis)} · ${t.dial} ${dialTime(measurement)}", style = MaterialTheme.typography.bodySmall) }; Text(rate, color = MaterialTheme.colorScheme.secondary)
     }
     HorizontalDivider()
+}
+
+@Composable private fun RecordActionsDialog(t: UiText, name: String, edit: () -> Unit, delete: () -> Unit, dismiss: () -> Unit) {
+    AlertDialog(onDismissRequest = dismiss, title = { Text(name, fontFamily = FontFamily.Serif) }, text = { Text(t.longPressActions) }, confirmButton = {
+        TextButton(edit) { Icon(Icons.Default.Edit, null); Spacer(Modifier.width(6.dp)); Text(t.editRecord) }
+    }, dismissButton = {
+        Row { TextButton(delete) { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error); Spacer(Modifier.width(6.dp)); Text(t.deleteRecord, color = MaterialTheme.colorScheme.error) }; TextButton(dismiss) { Text(t.cancel) } }
+    })
+}
+
+@Composable private fun ConfirmDeleteDialog(t: UiText, name: String, confirm: () -> Unit, dismiss: () -> Unit) {
+    AlertDialog(onDismissRequest = dismiss, icon = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) }, title = { Text(t.confirmDelete) }, text = { Text("${t.confirmDeleteDescription}\n$name") }, confirmButton = { TextButton(confirm) { Text(t.deleteRecord, color = MaterialTheme.colorScheme.error) } }, dismissButton = { TextButton(dismiss) { Text(t.cancel) } })
+}
+
+@Composable private fun EditWatchDialog(t: UiText, watch: Watch, save: (Watch) -> Unit, dismiss: () -> Unit) {
+    var brand by remember(watch.id) { mutableStateOf(watch.brand) }
+    var model by remember(watch.id) { mutableStateOf(watch.model) }
+    AlertDialog(onDismissRequest = dismiss, title = { Text(t.editWatch) }, text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) { OutlinedTextField(brand, { brand = it }, label = { Text(t.brand) }, singleLine = true); OutlinedTextField(model, { model = it }, label = { Text(t.model) }, singleLine = true) } }, confirmButton = { TextButton({ save(watch.copy(brand = brand.trim(), model = model.trim())) }, enabled = brand.isNotBlank() && model.isNotBlank()) { Text(t.saveChanges) } }, dismissButton = { TextButton(dismiss) { Text(t.cancel) } })
+}
+
+@Composable private fun EditMeasurementDialog(t: UiText, measurement: Measurement, save: (Measurement) -> Unit, dismiss: () -> Unit) {
+    var hour by remember(measurement.id) { mutableStateOf(measurement.dialHour.toString()) }
+    var minute by remember(measurement.id) { mutableStateOf(measurement.dialMinute.toString()) }
+    var second by remember(measurement.id) { mutableStateOf(measurement.dialSecond.toString()) }
+    var layout by remember(measurement.id) { mutableStateOf(measurement.layout) }
+    var layoutOpen by remember { mutableStateOf(false) }
+    fun layoutName(value: DialLayout) = when (value) { DialLayout.CLASSIC -> t.layoutClassic; DialLayout.GMT -> t.layoutGmt; DialLayout.SMALL_SECONDS -> t.layoutSmallSeconds; DialLayout.REGULATOR -> t.layoutRegulator; DialLayout.JUMP_HOUR -> t.layoutJumpHour }
+    val valid = hour.toIntOrNull()?.let { it in 0..23 } == true && minute.toIntOrNull()?.let { it in 0..59 } == true && second.toIntOrNull()?.let { it in 0..59 } == true
+    AlertDialog(onDismissRequest = dismiss, title = { Text(t.editMeasurement) }, text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { TimeInput(t.hours, hour, { hour = it }, Modifier.weight(1f)); TimeInput(t.minutes, minute, { minute = it }, Modifier.weight(1f)); TimeInput(t.seconds, second, { second = it }, Modifier.weight(1f)) }
+        Box { OutlinedButton({ layoutOpen = true }, Modifier.fillMaxWidth()) { Text(layoutName(layout), Modifier.weight(1f)); Icon(Icons.Default.ArrowDropDown, null) }; DropdownMenu(layoutOpen, { layoutOpen = false }) { DialLayout.entries.forEach { value -> DropdownMenuItem({ Text(layoutName(value)) }, { layout = value; layoutOpen = false }) } } }
+    } }, confirmButton = { TextButton({ save(measurement.copy(dialHour = hour.toInt(), dialMinute = minute.toInt(), dialSecond = second.toInt(), layout = layout)) }, enabled = valid) { Text(t.saveChanges) } }, dismissButton = { TextButton(dismiss) { Text(t.cancel) } })
 }
 
 @Composable private fun TemplateScreen(t: UiText, back: () -> Unit, next: (DialShape) -> Unit) {
