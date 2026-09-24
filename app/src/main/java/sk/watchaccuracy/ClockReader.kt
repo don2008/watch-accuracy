@@ -73,6 +73,28 @@ object ClockReader {
         )
     }
 
+    fun applyProfile(read: ReadTime, profile: WatchLearning): ReadTime {
+        if (profile.samples == 0) return read
+        val strength = minOf(1f, profile.samples / 3f)
+        fun adjusted(angle: Int, offset: Float): Int = if (angle < 0) angle else ((angle + offset * strength).roundToInt() % 360 + 360) % 360
+        val hourAngle = adjusted(read.hourImageAngle, profile.hourOffset)
+        val minuteAngle = adjusted(read.minuteImageAngle, profile.minuteOffset)
+        val secondAngle = adjusted(read.secondImageAngle, profile.secondOffset)
+        if (minuteAngle < 0) return read.copy(
+            layout = profile.preferredLayout ?: read.layout,
+            hourImageAngle = hourAngle,
+            minuteImageAngle = minuteAngle,
+            secondImageAngle = secondAngle
+        )
+        val minute = ((minuteAngle / 6f).roundToInt() % 60 + 60) % 60
+        val second = if (secondAngle >= 0) ((secondAngle / 6f).roundToInt() % 60 + 60) % 60 else read.second
+        val hour12 = if (hourAngle >= 0) {
+            ((((hourAngle - minute * .5f + 15f) / 30f).toInt() % 12) + 12) % 12
+        } else ((read.hour % 12) + 12) % 12
+        val hour = listOf(hour12, hour12 + 12).minByOrNull { kotlin.math.abs(it - read.hour) } ?: read.hour
+        return read.copy(hour = hour, minute = minute, second = second, layout = profile.preferredLayout ?: read.layout, hourImageAngle = hourAngle, minuteImageAngle = minuteAngle, secondImageAngle = secondAngle)
+    }
+
     private fun radialBands(bitmap: Bitmap): Array<FloatArray> {
         val result = Array(360) { FloatArray(3) }; val count = Array(360) { IntArray(3) }
         val cx = bitmap.width / 2.0; val cy = bitmap.height / 2.0

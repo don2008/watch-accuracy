@@ -106,6 +106,11 @@ class WatchRepository(context: Context) {
             val values = w.optJSONArray("measurements") ?: JSONArray()
             Watch(
                 id = w.getString("id"), brand = w.getString("brand"), model = w.getString("model"),
+                learning = w.optJSONObject("learning")?.let { p -> WatchLearning(
+                    samples = p.optInt("samples", 0), hourOffset = p.optDouble("hourOffset", 0.0).toFloat(),
+                    minuteOffset = p.optDouble("minuteOffset", 0.0).toFloat(), secondOffset = p.optDouble("secondOffset", 0.0).toFloat(),
+                    preferredLayout = p.optString("preferredLayout").takeIf { it.isNotBlank() }?.let { runCatching { DialLayout.valueOf(it) }.getOrNull() }
+                ) } ?: WatchLearning(),
                 measurements = List(values.length()) { j ->
                     val m = values.getJSONObject(j)
                     val photoEntry = m.optString("photoEntry")
@@ -133,6 +138,11 @@ class WatchRepository(context: Context) {
             }) }
             put(JSONObject().apply {
                 put("id", watch.id); put("brand", watch.brand); put("model", watch.model); put("measurements", measurements)
+                put("learning", JSONObject().apply {
+                    put("samples", watch.learning.samples); put("hourOffset", watch.learning.hourOffset)
+                    put("minuteOffset", watch.learning.minuteOffset); put("secondOffset", watch.learning.secondOffset)
+                    watch.learning.preferredLayout?.let { put("preferredLayout", it.name) }
+                })
             })
         }
     }

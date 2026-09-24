@@ -31,4 +31,13 @@ class DeviationCalculatorTest {
         val end = measurement(77_822_000, 18, 8, 34)
         assertEquals(12.21248, DeviationCalculator.secondsPerDay(start, end)!!, 0.00001)
     }
+
+    @Test fun alwaysUsesChronologicallyPreviousMeasurement() {
+        val first = measurement(0, 10, 0, 0)
+        val second = measurement(86_400_000, 10, 0, 3)
+        val third = measurement(172_800_000, 10, 0, 11)
+        val shuffled = listOf(third, first, second)
+        assertEquals(second.id, DeviationCalculator.previousMeasurement(shuffled, third)?.id)
+        assertEquals(8.0, DeviationCalculator.latestSecondsPerDay(shuffled)!!, 0.001)
+    }
 }
