@@ -20,9 +20,15 @@ data class WatchLearning(
     val hourOffset: Float = 0f,
     val minuteOffset: Float = 0f,
     val secondOffset: Float = 0f,
-    val preferredLayout: DialLayout? = null
+    val preferredLayout: DialLayout? = null,
+    /** Version of the profile algorithm used for this watch. Older profiles are replayed. */
+    val replayVersion: Int = 2
 ) {
     fun learn(read: ReadTime, hour: Int, minute: Int, second: Int, layout: DialLayout): WatchLearning {
+        // A missing photo or an unreadable image must not count as a training sample.
+        if (read.hourImageAngle < 0 && read.minuteImageAngle < 0 && read.secondImageAngle < 0) {
+            return copy(preferredLayout = layout, replayVersion = 2)
+        }
         val alpha = if (samples == 0) 1f else .35f
         fun blend(old: Float, detected: Int, expected: Float): Float {
             if (detected < 0) return old
@@ -34,7 +40,8 @@ data class WatchLearning(
             hourOffset = blend(hourOffset, read.hourImageAngle, expectedHour),
             minuteOffset = blend(minuteOffset, read.minuteImageAngle, minute * 6f),
             secondOffset = if (layout == DialLayout.SMALL_SECONDS || layout == DialLayout.CHRONOGRAPH) secondOffset else blend(secondOffset, read.secondImageAngle, second * 6f),
-            preferredLayout = layout)
+            preferredLayout = layout,
+            replayVersion = 2)
     }
 }
 

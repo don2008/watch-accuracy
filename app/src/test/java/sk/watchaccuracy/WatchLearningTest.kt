@@ -21,7 +21,7 @@ class WatchLearningTest {
     @Test fun secondAndLaterSamplesBlendInsteadOfResetting() {
         val first = ReadTime(hour = 0, minute = 0, second = 0, hourImageAngle = 0, minuteImageAngle = 0, secondImageAngle = 0)
         val profile = WatchLearning().learn(first, 1, 0, 0, DialLayout.CLASSIC)
-        val second = ReadTime(hour = 0, minute = 0, second = 0, hourImageAngle = 30, minuteImageAngle = 0, secondImageAngle = 0)
+        val second = ReadTime(hour = 0, minute = 0, second = 0, hourImageAngle = 20, minuteImageAngle = 0, secondImageAngle = 0)
         val updated = profile.learn(second, 2, 0, 0, DialLayout.CLASSIC)
         assertTrue(updated.samples == 2)
         assertTrue(updated.hourOffset > profile.hourOffset)

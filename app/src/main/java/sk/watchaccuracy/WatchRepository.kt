@@ -109,7 +109,10 @@ class WatchRepository(context: Context) {
                 learning = w.optJSONObject("learning")?.let { p -> WatchLearning(
                     samples = p.optInt("samples", 0), hourOffset = p.optDouble("hourOffset", 0.0).toFloat(),
                     minuteOffset = p.optDouble("minuteOffset", 0.0).toFloat(), secondOffset = p.optDouble("secondOffset", 0.0).toFloat(),
-                    preferredLayout = p.optString("preferredLayout").takeIf { it.isNotBlank() }?.let { runCatching { DialLayout.valueOf(it) }.getOrNull() }
+                    preferredLayout = p.optString("preferredLayout").takeIf { it.isNotBlank() }?.let { runCatching { DialLayout.valueOf(it) }.getOrNull() },
+                    // Backups made before replay support are deliberately marked
+                    // stale so their existing photos can train the corrected model.
+                    replayVersion = p.optInt("replayVersion", 0)
                 ) } ?: WatchLearning(),
                 measurements = List(values.length()) { j ->
                     val m = values.getJSONObject(j)
@@ -141,6 +144,7 @@ class WatchRepository(context: Context) {
                 put("learning", JSONObject().apply {
                     put("samples", watch.learning.samples); put("hourOffset", watch.learning.hourOffset)
                     put("minuteOffset", watch.learning.minuteOffset); put("secondOffset", watch.learning.secondOffset)
+                    put("replayVersion", watch.learning.replayVersion)
                     watch.learning.preferredLayout?.let { put("preferredLayout", it.name) }
                 })
             })

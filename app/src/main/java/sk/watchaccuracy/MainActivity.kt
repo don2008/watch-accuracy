@@ -66,6 +66,8 @@ import kotlin.math.atan2
 import kotlin.math.roundToInt
 import android.view.MotionEvent
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 private sealed interface Screen {
     data object Watches : Screen
@@ -108,6 +110,29 @@ private fun WatchAccuracyApp() {
     var shutterPosition by remember { mutableStateOf(repo.shutterPosition()) }
     var transferMessage by remember { mutableStateOf<String?>(null) }
     val t = uiText(language)
+    // Rebuild profiles created by older app versions from the authoritative data:
+    // the saved photograph plus the manually confirmed dial time. This is done
+    // once per watch (replayVersion) and never changes the stored measurements.
+    LaunchedEffect(Unit) {
+        val initial = watches
+        if (initial.any { it.learning.replayVersion < 2 && it.measurements.isNotEmpty() }) {
+            val rebuilt = withContext(Dispatchers.Default) {
+                initial.map { watch ->
+                    if (watch.learning.replayVersion >= 2) watch
+                    else {
+                        val isGmt = (watch.brand + " " + watch.model).contains("GMT", ignoreCase = true)
+                        val profile = watch.measurements.sortedBy { it.capturedAtMillis }.fold(WatchLearning()) { learned, measurement ->
+                            val raw = ClockReader.read(context, measurement.photoPath, measurement.capturedAtMillis, isKnownGmt = isGmt)
+                            learned.learn(raw, measurement.dialHour, measurement.dialMinute, measurement.dialSecond, measurement.layout)
+                        }
+                        watch.copy(learning = profile)
+                    }
+                }
+            }
+            watches = rebuilt
+            repo.save(rebuilt)
+        }
+    }
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
         if (uri != null) transferMessage = if (repo.exportArchive(uri, watches).isSuccess) t.exportSuccess else t.exportError
     }
