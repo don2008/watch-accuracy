@@ -67,6 +67,7 @@ import kotlin.math.roundToInt
 import android.view.MotionEvent
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private sealed interface Screen {
@@ -83,7 +84,8 @@ private sealed interface Screen {
         /** Profile-corrected suggestion shown to the user. */
         val read: ReadTime,
         /** Uncorrected detector output used as the learning sample. */
-        val rawRead: ReadTime
+        val rawRead: ReadTime,
+        val cloud: CloudReading? = null
     ) : Screen
     data class Record(val watchId: String, val measurementId: String) : Screen
     data object Settings : Screen
@@ -108,7 +110,9 @@ private fun WatchAccuracyApp() {
     var palette by remember { mutableStateOf(repo.palette()) }
     var language by remember { mutableStateOf(repo.language()) }
     var shutterPosition by remember { mutableStateOf(repo.shutterPosition()) }
+    var geminiApiKey by remember { mutableStateOf(repo.geminiApiKey()) }
     var transferMessage by remember { mutableStateOf<String?>(null) }
+    val cloudScope = rememberCoroutineScope()
     val t = uiText(language)
     // Rebuild profiles created by older app versions from the authoritative data:
     // the saved photograph plus the manually confirmed dial time. This is done
@@ -194,7 +198,13 @@ private fun WatchAccuracyApp() {
                     val read = ClockReader.applyProfile(rawRead, watch.learning)
                     val suggested = if (isGmt) read.copy(layout = DialLayout.GMT, layoutConfidence = 1f) else read
                     val raw = if (isGmt) rawRead.copy(layout = DialLayout.GMT, layoutConfidence = 1f) else rawRead
-                    navigate(Screen.Review(s.watchId, s.shape, path, at, suggested, raw))
+                    cloudScope.launch(Dispatchers.IO) {
+                        val cloud = CloudReader.read(path, geminiApiKey)
+                        withContext(Dispatchers.Main) {
+                            val cloudRead = cloud?.let { suggested.copy(hour = it.hour, minute = it.minute, second = it.second) } ?: suggested
+                            navigate(Screen.Review(s.watchId, s.shape, path, at, cloudRead, raw, cloud))
+                        }
+                    }
                 }
                 is Screen.Review -> ReviewScreen(t, s, ::goBack) { h, m, sec, layout ->
                     val measurement = Measurement(capturedAtMillis = s.capturedAt, dialHour = h, dialMinute = m, dialSecond = sec, photoPath = s.path, shape = s.shape, layout = layout)
@@ -208,6 +218,7 @@ private fun WatchAccuracyApp() {
                 Screen.Settings -> SettingsScreen(
                     t, palette, { palette = it; repo.savePalette(it) }, language, { language = it; repo.saveLanguage(it) },
                     shutterPosition, { shutterPosition = it; repo.saveShutterPosition(it) },
+                    geminiApiKey, { geminiApiKey = it; repo.saveGeminiApiKey(it) },
                     { exportLauncher.launch("watch-accuracy-${SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())}.zip") },
                     { importLauncher.launch(arrayOf("application/zip", "application/octet-stream")) },
                     transferMessage, { transferMessage = null }, ::goBack
@@ -493,6 +504,13 @@ private fun latestRate(t: UiText, w: Watch): String {
     Scaffold(topBar = { AppHeader(t.measurementCheck, t.back, retake) }) { pad ->
         Column(Modifier.padding(pad).verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 10.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
             ManualDialPhoto(t, s.path, s.shape, s.capturedAt, s.read, layout, { h = it.toString() }, { m = it.toString() }, { sec = it.toString() })
+            s.cloud?.let { cloud ->
+                Text(
+                    t.cloudAi + ": " + String.format(Locale.getDefault(), "%02d:%02d:%02d · %d %%", cloud.hour, cloud.minute, cloud.second, (cloud.confidence * 100).toInt()),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.secondary
+                )
+            }
             Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(t.dialTime, style = MaterialTheme.typography.titleLarge, fontFamily = FontFamily.Serif)
@@ -631,14 +649,19 @@ private fun latestRate(t: UiText, w: Watch): String {
 @Composable private fun DataRow(label: String, value: String) { Row(Modifier.fillMaxWidth().padding(vertical = 14.dp)) { Text(label, Modifier.weight(1f)); Text(value) }; HorizontalDivider() }
 
 @OptIn(ExperimentalMaterial3Api::class)
-@Composable private fun SettingsScreen(t: UiText, palette: AppPalette, setPalette: (AppPalette) -> Unit, language: String, setLanguage: (String) -> Unit, shutterPosition: ShutterPosition, setShutterPosition: (ShutterPosition) -> Unit, exportData: () -> Unit, importData: () -> Unit, transferMessage: String?, clearMessage: () -> Unit, back: () -> Unit) {
+@Composable private fun SettingsScreen(t: UiText, palette: AppPalette, setPalette: (AppPalette) -> Unit, language: String, setLanguage: (String) -> Unit, shutterPosition: ShutterPosition, setShutterPosition: (ShutterPosition) -> Unit, geminiApiKey: String, setGeminiApiKey: (String) -> Unit, exportData: () -> Unit, importData: () -> Unit, transferMessage: String?, clearMessage: () -> Unit, back: () -> Unit) {
     var lang by remember { mutableStateOf(language) }
+    var apiKey by remember { mutableStateOf(geminiApiKey) }
     Scaffold(topBar = { AppHeader(t.settings, t.back, back) }) { pad -> Column(Modifier.padding(pad).verticalScroll(rememberScrollState()).padding(20.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
         Text(t.environment, style = MaterialTheme.typography.labelMedium); Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.Language, null); Text(t.language, Modifier.padding(start = 12.dp).weight(1f)); SingleChoiceSegmentedButtonRow { listOf("sk" to "Slovenčina", "en" to "English").forEachIndexed { i, pair -> SegmentedButton(selected = lang == pair.first, onClick = { lang = pair.first; setLanguage(pair.first) }, shape = SegmentedButtonDefaults.itemShape(i,2)) { Text(pair.second) } } } }
         Text(t.colorCombination, style = MaterialTheme.typography.labelMedium)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) { AppPalette.entries.forEach { p -> PaletteChoice(t, p, palette == p, { setPalette(p) }, Modifier.weight(1f)) } }
         Text(t.shutterPosition, style = MaterialTheme.typography.labelMedium)
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) { ShutterPosition.entries.forEachIndexed { i, position -> SegmentedButton(selected = shutterPosition == position, onClick = { setShutterPosition(position) }, shape = SegmentedButtonDefaults.itemShape(i, ShutterPosition.entries.size), modifier = Modifier.weight(1f)) { Text(when (position) { ShutterPosition.LEFT -> t.left; ShutterPosition.CENTER -> t.center; ShutterPosition.RIGHT -> t.right }) } } }
+        Text(t.cloudAi, style = MaterialTheme.typography.labelMedium)
+        Text(t.geminiApiKeyHelp, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        OutlinedTextField(apiKey, { apiKey = it }, label = { Text(t.geminiApiKey) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+        OutlinedButton(onClick = { setGeminiApiKey(apiKey) }, modifier = Modifier.fillMaxWidth()) { Text(t.saveApiKey) }
         Text(t.backup, style = MaterialTheme.typography.labelMedium)
         Text(t.backupDescription, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {

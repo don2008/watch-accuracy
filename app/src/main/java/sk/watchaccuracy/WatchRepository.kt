@@ -157,4 +157,6 @@ class WatchRepository(context: Context) {
     fun saveLanguage(value: String) = prefs.edit().putString("language", value).apply()
     fun shutterPosition(): ShutterPosition = runCatching { ShutterPosition.valueOf(prefs.getString("shutter_position", "CENTER")!!) }.getOrDefault(ShutterPosition.CENTER)
     fun saveShutterPosition(value: ShutterPosition) = prefs.edit().putString("shutter_position", value.name).apply()
+    fun geminiApiKey(): String = prefs.getString("gemini_api_key", "") ?: ""
+    fun saveGeminiApiKey(value: String) = prefs.edit().putString("gemini_api_key", value.trim()).apply()
 }

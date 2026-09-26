@@ -26,7 +26,8 @@ data class UiText(
     val aiHandSuggestion: String,
     val editRecord: String, val deleteRecord: String, val cancel: String, val confirmDelete: String,
     val confirmDeleteDescription: String, val editWatch: String, val editMeasurement: String,
-    val saveChanges: String, val longPressActions: String, val searchCatalog: String, val noCatalogMatches: String
+    val saveChanges: String, val longPressActions: String, val searchCatalog: String, val noCatalogMatches: String,
+    val cloudAi: String, val geminiApiKey: String, val geminiApiKeyHelp: String, val saveApiKey: String
 )
 
 fun uiText(language: String) = if (language == "en") UiText(
@@ -55,7 +56,8 @@ fun uiText(language: String) = if (language == "en") UiText(
     editRecord="Edit", deleteRecord="Delete", cancel="Cancel", confirmDelete="Delete record?",
     confirmDeleteDescription="Do you really want to permanently delete this record?", editWatch="Edit watch", editMeasurement="Edit measurement",
     saveChanges="Save changes", longPressActions="Choose what you want to do with this record.",
-    searchCatalog="Search catalog", noCatalogMatches="No matches. You can enter your own text."
+    searchCatalog="Search catalog", noCatalogMatches="No matches. You can enter your own text.",
+    cloudAi="Online AI check", geminiApiKey="Gemini API key", geminiApiKeyHelp="Optional. Gemini 2.5 Flash checks the dial when internet is available.", saveApiKey="Save API key"
 ) else UiText(
     watches="Hodinky", settings="Nastavenia", addWatch="Pridať hodinky", noWatches="Zatiaľ nemáte uložené žiadne hodinky",
     measurements="meraní", firstMeasurement="prvé meranie", lastDeviation="Posledná denná odchýlka",
@@ -82,5 +84,6 @@ fun uiText(language: String) = if (language == "en") UiText(
     editRecord="Upraviť", deleteRecord="Vymazať", cancel="Zrušiť", confirmDelete="Vymazať záznam?",
     confirmDeleteDescription="Naozaj chcete tento záznam natrvalo vymazať?", editWatch="Upraviť hodinky", editMeasurement="Upraviť meranie",
     saveChanges="Uložiť zmeny", longPressActions="Vyberte, čo chcete s týmto záznamom urobiť.",
-    searchCatalog="Hľadať v katalógu", noCatalogMatches="Nič sa nenašlo. Môžete zadať vlastný text."
+    searchCatalog="Hľadať v katalógu", noCatalogMatches="Nič sa nenašlo. Môžete zadať vlastný text.",
+    cloudAi="Online kontrola AI", geminiApiKey="Gemini API kľúč", geminiApiKeyHelp="Voliteľné. Gemini 2.5 Flash skontroluje ciferník pri dostupnom internete.", saveApiKey="Uložiť API kľúč"
 )
