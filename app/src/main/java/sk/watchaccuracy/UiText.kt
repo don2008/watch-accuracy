@@ -26,7 +26,7 @@ data class UiText(
     val aiHandSuggestion: String,
     val editRecord: String, val deleteRecord: String, val cancel: String, val confirmDelete: String,
     val confirmDeleteDescription: String, val editWatch: String, val editMeasurement: String,
-    val saveChanges: String, val longPressActions: String
+    val saveChanges: String, val longPressActions: String, val searchCatalog: String, val noCatalogMatches: String
 )
 
 fun uiText(language: String) = if (language == "en") UiText(
@@ -54,7 +54,8 @@ fun uiText(language: String) = if (language == "en") UiText(
     aiHandSuggestion="Local AI suggested the hand positions. Drag any coloured endpoint to refine it.",
     editRecord="Edit", deleteRecord="Delete", cancel="Cancel", confirmDelete="Delete record?",
     confirmDeleteDescription="Do you really want to permanently delete this record?", editWatch="Edit watch", editMeasurement="Edit measurement",
-    saveChanges="Save changes", longPressActions="Choose what you want to do with this record."
+    saveChanges="Save changes", longPressActions="Choose what you want to do with this record.",
+    searchCatalog="Search catalog", noCatalogMatches="No matches. You can enter your own text."
 ) else UiText(
     watches="Hodinky", settings="Nastavenia", addWatch="Pridať hodinky", noWatches="Zatiaľ nemáte uložené žiadne hodinky",
     measurements="meraní", firstMeasurement="prvé meranie", lastDeviation="Posledná denná odchýlka",
@@ -80,18 +81,6 @@ fun uiText(language: String) = if (language == "en") UiText(
     aiHandSuggestion="Lokálna AI navrhla polohy ručičiek. Každý farebný koncový bod môžete posunúť.",
     editRecord="Upraviť", deleteRecord="Vymazať", cancel="Zrušiť", confirmDelete="Vymazať záznam?",
     confirmDeleteDescription="Naozaj chcete tento záznam natrvalo vymazať?", editWatch="Upraviť hodinky", editMeasurement="Upraviť meranie",
-    saveChanges="Uložiť zmeny", longPressActions="Vyberte, čo chcete s týmto záznamom urobiť."
-)
-
-val knownModels = linkedMapOf(
-    "Rolex" to listOf("Oyster Perpetual 41", "Submariner", "Datejust", "Explorer", "GMT-Master II"),
-    "Omega" to listOf("Speedmaster", "Seamaster", "Constellation", "De Ville"),
-    "TAG Heuer" to listOf("Monaco", "Carrera", "Aquaracer", "Formula 1"),
-    "Jaeger-LeCoultre" to listOf("Reverso", "Master Control", "Polaris"),
-    "Seiko" to listOf("Presage", "Prospex", "Seiko 5 Sports", "Astron"),
-    "Tissot" to listOf("PRX", "Le Locle", "Gentleman", "Seastar"),
-    "Longines" to listOf("Spirit", "HydroConquest", "Master Collection", "DolceVita"),
-    "Hamilton" to listOf("Khaki Field", "Jazzmaster", "Ventura"),
-    "Citizen" to listOf("Tsuyosa", "Promaster", "Series 8"),
-    "Orient" to listOf("Bambino", "Kamasu", "Mako")
+    saveChanges="Uložiť zmeny", longPressActions="Vyberte, čo chcete s týmto záznamom urobiť.",
+    searchCatalog="Hľadať v katalógu", noCatalogMatches="Nič sa nenašlo. Môžete zadať vlastný text."
 )

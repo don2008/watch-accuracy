@@ -217,20 +217,52 @@ private fun latestRate(t: UiText, w: Watch): String {
 @Composable private fun AddWatchScreen(t: UiText, watches: List<Watch>, back: () -> Unit, save: (String, String) -> Unit) {
     var brand by remember { mutableStateOf("") }; var model by remember { mutableStateOf("") }
     var brandsOpen by remember { mutableStateOf(false) }; var modelsOpen by remember { mutableStateOf(false) }
-    val brands = (knownModels.keys + watches.map { it.brand }).distinct().filter { brand.isBlank() || it.contains(brand, true) }
-    val models = ((knownModels.entries.firstOrNull { it.key.equals(brand, true) }?.value ?: emptyList()) + watches.filter { it.brand.equals(brand, true) }.map { it.model }).distinct().filter { model.isBlank() || it.contains(model, true) }
+    var brandPickerOpen by remember { mutableStateOf(false) }; var modelPickerOpen by remember { mutableStateOf(false) }
+    val brands = (WatchCatalog.brands + watches.map { it.brand }).distinctBy { it.lowercase(Locale.ROOT) }
+    val models = (WatchCatalog.modelsFor(brand) + watches.filter { it.brand.equals(brand, true) }.map { it.model })
+        .distinctBy { it.lowercase(Locale.ROOT) }
+    val brandSuggestions = if (brand.isBlank()) emptyList() else brands.filter { it.contains(brand, true) }.take(8)
+    val modelSuggestions = if (model.isBlank()) emptyList() else models.filter { it.contains(model, true) }.take(8)
     Scaffold(topBar = { AppHeader(t.addWatch, t.back, back) }, bottomBar = { PrimaryBottomButton(t.saveWatch, Icons.Default.Check, { if (brand.isNotBlank() && model.isNotBlank()) save(brand, model) }, brand.isNotBlank() && model.isNotBlank()) }) { pad ->
         Column(Modifier.padding(pad).padding(20.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-            Box { OutlinedTextField(brand, { brand = it; model = ""; brandsOpen = true }, Modifier.fillMaxWidth(), label = { Text(t.brand) }, placeholder = { Text(t.chooseBrand) }, leadingIcon = { Icon(Icons.Default.Watch, null) }, trailingIcon = { IconButton({ brandsOpen = !brandsOpen }) { Icon(Icons.Default.ArrowDropDown, null) } }, singleLine = true)
-                DropdownMenu(brandsOpen && brands.isNotEmpty(), { brandsOpen = false }, Modifier.fillMaxWidth(.88f)) { brands.forEach { value -> DropdownMenuItem({ Text(value) }, { brand = value; model = ""; brandsOpen = false; modelsOpen = true }) } }
+            Box { OutlinedTextField(brand, { brand = it; model = ""; brandsOpen = true; modelsOpen = false }, Modifier.fillMaxWidth(), label = { Text(t.brand) }, placeholder = { Text(t.chooseBrand) }, leadingIcon = { Icon(Icons.Default.Watch, null) }, trailingIcon = { IconButton({ brandsOpen = false; brandPickerOpen = true }) { Icon(Icons.Default.ArrowDropDown, t.chooseBrand) } }, singleLine = true)
+                DropdownMenu(brandsOpen && brandSuggestions.isNotEmpty(), { brandsOpen = false }, Modifier.fillMaxWidth(.88f)) { brandSuggestions.forEach { value -> DropdownMenuItem({ Text(value) }, { brand = value; model = ""; brandsOpen = false }) } }
             }
-            Box { OutlinedTextField(model, { model = it; modelsOpen = true }, Modifier.fillMaxWidth(), label = { Text(t.model) }, placeholder = { Text(t.chooseModel) }, trailingIcon = { IconButton({ modelsOpen = !modelsOpen }) { Icon(Icons.Default.ArrowDropDown, null) } }, singleLine = true)
-                DropdownMenu(modelsOpen && models.isNotEmpty(), { modelsOpen = false }, Modifier.fillMaxWidth(.88f)) { models.forEach { value -> DropdownMenuItem({ Text(value) }, { model = value; modelsOpen = false }) } }
+            Box { OutlinedTextField(model, { model = it; modelsOpen = true }, Modifier.fillMaxWidth(), label = { Text(t.model) }, placeholder = { Text(t.chooseModel) }, trailingIcon = { IconButton({ modelsOpen = false; modelPickerOpen = true }) { Icon(Icons.Default.ArrowDropDown, t.chooseModel) } }, singleLine = true)
+                DropdownMenu(modelsOpen && modelSuggestions.isNotEmpty(), { modelsOpen = false }, Modifier.fillMaxWidth(.88f)) { modelSuggestions.forEach { value -> DropdownMenuItem({ Text(value) }, { model = value; modelsOpen = false }) } }
             }
             Text(t.recentBrands, style = MaterialTheme.typography.labelMedium)
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) { watches.map { it.brand }.distinct().take(5).forEach { AssistChip(onClick = { brand = it }, label = { Text(it) }) } }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) { watches.map { it.brand }.distinct().takeLast(5).reversed().forEach { AssistChip(onClick = { brand = it; model = ""; brandsOpen = false }, label = { Text(it) }) } }
         }
     }
+    if (brandPickerOpen) CatalogPickerDialog(t, t.brand, brands, { brandPickerOpen = false }) {
+        brand = it; model = ""; brandPickerOpen = false
+    }
+    if (modelPickerOpen) CatalogPickerDialog(t, t.model, models, { modelPickerOpen = false }) {
+        model = it; modelPickerOpen = false
+    }
+}
+
+@Composable private fun CatalogPickerDialog(t: UiText, title: String, options: List<String>, dismiss: () -> Unit, select: (String) -> Unit) {
+    var query by remember { mutableStateOf("") }
+    val filtered = remember(options, query) { options.filter { it.contains(query.trim(), ignoreCase = true) } }
+    AlertDialog(
+        onDismissRequest = dismiss,
+        title = { Text(title) },
+        text = {
+            Column {
+                OutlinedTextField(query, { query = it }, label = { Text(t.searchCatalog) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                Spacer(Modifier.height(8.dp))
+                if (filtered.isEmpty()) Text(t.noCatalogMatches, style = MaterialTheme.typography.bodySmall)
+                else LazyColumn(Modifier.heightIn(max = 400.dp)) {
+                    items(filtered) { value ->
+                        Text(value, Modifier.fillMaxWidth().clickable { select(value) }.padding(vertical = 13.dp, horizontal = 8.dp))
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(dismiss) { Text(t.close) } }
+    )
 }
 
 @Composable private fun WatchDetailScreen(t: UiText, watch: Watch, back: () -> Unit, newMeasurement: () -> Unit, openRecord: (String) -> Unit, editMeasurement: (Measurement) -> Unit, deleteMeasurement: (Measurement) -> Unit) {
@@ -274,7 +306,18 @@ private fun latestRate(t: UiText, w: Watch): String {
 @Composable private fun EditWatchDialog(t: UiText, watch: Watch, save: (Watch) -> Unit, dismiss: () -> Unit) {
     var brand by remember(watch.id) { mutableStateOf(watch.brand) }
     var model by remember(watch.id) { mutableStateOf(watch.model) }
-    AlertDialog(onDismissRequest = dismiss, title = { Text(t.editWatch) }, text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) { OutlinedTextField(brand, { brand = it }, label = { Text(t.brand) }, singleLine = true); OutlinedTextField(model, { model = it }, label = { Text(t.model) }, singleLine = true) } }, confirmButton = { TextButton({ save(watch.copy(brand = brand.trim(), model = model.trim())) }, enabled = brand.isNotBlank() && model.isNotBlank()) { Text(t.saveChanges) } }, dismissButton = { TextButton(dismiss) { Text(t.cancel) } })
+    var brandPickerOpen by remember { mutableStateOf(false) }
+    var modelPickerOpen by remember { mutableStateOf(false) }
+    AlertDialog(onDismissRequest = dismiss, title = { Text(t.editWatch) }, text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        OutlinedTextField(brand, { brand = it }, label = { Text(t.brand) }, singleLine = true, trailingIcon = { IconButton({ brandPickerOpen = true }) { Icon(Icons.Default.ArrowDropDown, t.chooseBrand) } })
+        OutlinedTextField(model, { model = it }, label = { Text(t.model) }, singleLine = true, trailingIcon = { IconButton({ modelPickerOpen = true }) { Icon(Icons.Default.ArrowDropDown, t.chooseModel) } })
+    } }, confirmButton = { TextButton({ save(watch.copy(brand = brand.trim(), model = model.trim())) }, enabled = brand.isNotBlank() && model.isNotBlank()) { Text(t.saveChanges) } }, dismissButton = { TextButton(dismiss) { Text(t.cancel) } })
+    if (brandPickerOpen) CatalogPickerDialog(t, t.brand, WatchCatalog.brands, { brandPickerOpen = false }) {
+        brand = it; model = ""; brandPickerOpen = false
+    }
+    if (modelPickerOpen) CatalogPickerDialog(t, t.model, WatchCatalog.modelsFor(brand), { modelPickerOpen = false }) {
+        model = it; modelPickerOpen = false
+    }
 }
 
 @Composable private fun EditMeasurementDialog(t: UiText, measurement: Measurement, save: (Measurement) -> Unit, dismiss: () -> Unit) {
