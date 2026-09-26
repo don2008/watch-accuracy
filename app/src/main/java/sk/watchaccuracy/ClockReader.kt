@@ -16,7 +16,8 @@ data class ReadTime(
     val hour: Int, val minute: Int, val second: Int, val confidence: Float = 0f,
     val layout: DialLayout = DialLayout.CLASSIC, val layoutConfidence: Float = 0f,
     val hourImageAngle: Int = -1, val minuteImageAngle: Int = -1, val secondImageAngle: Int = -1,
-    val centerX: Float = .5f, val centerY: Float = .5f
+    val centerX: Float = .5f, val centerY: Float = .5f,
+    val geometry: DialGeometry? = null
 )
 
 /** Offline learned hand classifier. No image or telemetry leaves the phone. */

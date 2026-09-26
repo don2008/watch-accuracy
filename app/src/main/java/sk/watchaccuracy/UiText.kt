@@ -27,7 +27,9 @@ data class UiText(
     val editRecord: String, val deleteRecord: String, val cancel: String, val confirmDelete: String,
     val confirmDeleteDescription: String, val editWatch: String, val editMeasurement: String,
     val saveChanges: String, val longPressActions: String, val searchCatalog: String, val noCatalogMatches: String,
-    val cloudAi: String, val geminiApiKey: String, val geminiApiKeyHelp: String, val saveApiKey: String, val processingPhoto: String
+    val cloudAi: String, val geminiApiKey: String, val geminiApiKeyHelp: String, val saveApiKey: String, val processingPhoto: String,
+    val cloudHandSuggestion: String, val cloudUnverified: String, val useCloudSuggestion: String,
+    val useLocalSuggestion: String, val manualTimeHint: String
 )
 
 fun uiText(language: String) = if (language == "en") UiText(
@@ -57,7 +59,11 @@ fun uiText(language: String) = if (language == "en") UiText(
     confirmDeleteDescription="Do you really want to permanently delete this record?", editWatch="Edit watch", editMeasurement="Edit measurement",
     saveChanges="Save changes", longPressActions="Choose what you want to do with this record.",
     searchCatalog="Search catalog", noCatalogMatches="No matches. You can enter your own text.",
-    cloudAi="Online AI check", geminiApiKey="Gemini API key", geminiApiKeyHelp="Optional. Gemini 3.8 Flash checks the dial when internet is available.", saveApiKey="Save API key", processingPhoto="Processing photo…"
+    cloudAi="Online AI check", geminiApiKey="Gemini API key", geminiApiKeyHelp="Optional. Gemini 3.8 Flash checks the dial when internet is available.", saveApiKey="Save API key", processingPhoto="Processing photo…",
+    cloudHandSuggestion="Gemini suggested these points. Check the actual pivot and all three hand tips. Drag to correct them.",
+    cloudUnverified="Unconfirmed suggestion. Geometric agreement does not guarantee correct reading. Check the seconds hand and AM/PM.",
+    useCloudSuggestion="Use Gemini", useLocalSuggestion="Use local AI",
+    manualTimeHint="Time entered manually. Hand markers are hidden to avoid showing a different suggestion."
 ) else UiText(
     watches="Hodinky", settings="Nastavenia", addWatch="Pridať hodinky", noWatches="Zatiaľ nemáte uložené žiadne hodinky",
     measurements="meraní", firstMeasurement="prvé meranie", lastDeviation="Posledná denná odchýlka",
@@ -85,5 +91,9 @@ fun uiText(language: String) = if (language == "en") UiText(
     confirmDeleteDescription="Naozaj chcete tento záznam natrvalo vymazať?", editWatch="Upraviť hodinky", editMeasurement="Upraviť meranie",
     saveChanges="Uložiť zmeny", longPressActions="Vyberte, čo chcete s týmto záznamom urobiť.",
     searchCatalog="Hľadať v katalógu", noCatalogMatches="Nič sa nenašlo. Môžete zadať vlastný text.",
-    cloudAi="Online kontrola AI", geminiApiKey="Gemini API kľúč", geminiApiKeyHelp="Voliteľné. Gemini 3.8 Flash skontroluje ciferník pri dostupnom internete.", saveApiKey="Uložiť API kľúč", processingPhoto="Spracovávanie fotografie…"
+    cloudAi="Online kontrola AI", geminiApiKey="Gemini API kľúč", geminiApiKeyHelp="Voliteľné. Gemini 3.8 Flash skontroluje ciferník pri dostupnom internete.", saveApiKey="Uložiť API kľúč", processingPhoto="Spracovávanie fotografie…",
+    cloudHandSuggestion="Body navrhlo Gemini. Skontrolujte skutočnú os a konce všetkých troch ručičiek. Body môžete posunúť.",
+    cloudUnverified="Nepotvrdený návrh. Zhoda geometrie nezaručuje správne odčítanie. Skontrolujte sekundovku aj dopoludnie/popoludnie.",
+    useCloudSuggestion="Použiť Gemini", useLocalSuggestion="Použiť lokálnu AI",
+    manualTimeHint="Čas je zadaný ručne. Body sú skryté, aby nezobrazovali odlišný návrh."
 )

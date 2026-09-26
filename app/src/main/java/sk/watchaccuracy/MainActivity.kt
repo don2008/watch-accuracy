@@ -197,17 +197,17 @@ private fun WatchAccuracyApp() {
                 is Screen.Processing -> {
                     LaunchedEffect(s.path) {
                         val result = withContext(Dispatchers.IO) {
+                            val photoPath = PhotoCropper.cropToTemplate(s.path, s.shape)
                             val watch = watches.first { it.id == s.watchId }
                             val isGmt = (watch.brand + " " + watch.model).contains("GMT", ignoreCase = true)
-                            val rawRead = ClockReader.read(context, s.path, s.capturedAt, isKnownGmt = isGmt)
+                            val rawRead = ClockReader.read(context, photoPath, s.capturedAt, isKnownGmt = isGmt)
                             val read = ClockReader.applyProfile(rawRead, watch.learning)
                             val suggested = if (isGmt) read.copy(layout = DialLayout.GMT, layoutConfidence = 1f) else read
                             val raw = if (isGmt) rawRead.copy(layout = DialLayout.GMT, layoutConfidence = 1f) else rawRead
-                            val cloudResult = CloudReader.readDetailed(s.path, geminiApiKey)
-                            val cloudRead = cloudResult.reading?.let { suggested.copy(hour = it.hour, minute = it.minute, second = it.second) } ?: suggested
-                            Screen.Review(s.watchId, s.shape, s.path, s.capturedAt, cloudRead, raw, cloudResult.reading, cloudResult.error?.takeIf { geminiApiKey.isNotBlank() })
+                            val cloudResult = CloudReader.readDetailed(photoPath, geminiApiKey)
+                            Screen.Review(s.watchId, s.shape, photoPath, s.capturedAt, suggested, raw, cloudResult.reading, cloudResult.error?.takeIf { geminiApiKey.isNotBlank() })
                         }
-                        navigate(result)
+                        backStack = backStack.dropLast(1) + result
                     }
                     ProcessingScreen(t)
                 }
@@ -270,7 +270,9 @@ private fun latestRate(t: UiText, w: Watch): String {
 }
 
 @Composable private fun ProcessingScreen(t: UiText) {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).pointerInput(Unit) {
+        awaitPointerEventScope { while (true) awaitPointerEvent().changes.forEach { it.consume() } }
+    }, contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(18.dp)) {
             CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
             Text(t.processingPhoto, style = MaterialTheme.typography.titleMedium)
@@ -394,7 +396,7 @@ private fun latestRate(t: UiText, w: Watch): String {
     val valid = hour.toIntOrNull()?.let { it in 0..23 } == true && minute.toIntOrNull()?.let { it in 0..59 } == true && second.toIntOrNull()?.let { it in 0..59 } == true
     AlertDialog(onDismissRequest = dismiss, title = { Text(t.editMeasurement) }, text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { TimeInput(t.hours, hour, { hour = it }, Modifier.weight(1f)); TimeInput(t.minutes, minute, { minute = it }, Modifier.weight(1f)); TimeInput(t.seconds, second, { second = it }, Modifier.weight(1f)) }
-        Box { OutlinedButton({ layoutOpen = true }, Modifier.fillMaxWidth()) { Text(layoutName(layout), Modifier.weight(1f)); Icon(Icons.Default.ArrowDropDown, null) }; DropdownMenu(layoutOpen, { layoutOpen = false }) { DialLayout.entries.forEach { value -> DropdownMenuItem({ Text(layoutName(value)) }, { layout = value; layoutOpen = false }) } } }
+        Box { OutlinedButton({ layoutOpen = true }, Modifier.fillMaxWidth()) { Text(layoutName(layout), Modifier.weight(1f)); Icon(Icons.Default.ArrowDropDown, null) }; DropdownMenu(layoutOpen, { layoutOpen = false }) { DialLayout.entries.forEach { value -> DropdownMenuItem({ Text(layoutName(value)) }, { layout = value; layoutOpen = false; showPoints = false }) } } }
     } }, confirmButton = { TextButton({ save(measurement.copy(dialHour = hour.toInt(), dialMinute = minute.toInt(), dialSecond = second.toInt(), layout = layout)) }, enabled = valid) { Text(t.saveChanges) } }, dismissButton = { TextButton(dismiss) { Text(t.cancel) } })
 }
 
@@ -423,6 +425,15 @@ private fun latestRate(t: UiText, w: Watch): String {
     var torchOn by remember { mutableStateOf(false) }
     var boundCamera by remember { mutableStateOf<androidx.camera.core.Camera?>(null) }
     var capturing by remember { mutableStateOf(false) }
+    val providerFuture = remember(context) { ProcessCameraProvider.getInstance(context) }
+    val cameraActive = remember { java.util.concurrent.atomic.AtomicBoolean(true) }
+    DisposableEffect(providerFuture) {
+        cameraActive.set(true)
+        onDispose {
+            cameraActive.set(false)
+            if (providerFuture.isDone) providerFuture.get().unbindAll()
+        }
+    }
     val shutterSound = remember { MediaActionSound().apply { load(MediaActionSound.SHUTTER_CLICK) } }
     DisposableEffect(Unit) { onDispose { shutterSound.release() } }
     var permitted by remember { mutableStateOf(context.checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) }
@@ -431,8 +442,9 @@ private fun latestRate(t: UiText, w: Watch): String {
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         if (permitted) androidx.compose.ui.viewinterop.AndroidView(factory = { ctx -> PreviewView(ctx).also { view ->
             view.scaleType = PreviewView.ScaleType.FIT_CENTER
-            val future = ProcessCameraProvider.getInstance(ctx)
+            val future = providerFuture
             future.addListener({
+                if (!cameraActive.get()) return@addListener
                 val provider = future.get()
                 val preview = Preview.Builder().setTargetAspectRatio(AspectRatio.RATIO_4_3).build().also { it.surfaceProvider = view.surfaceProvider }
                 imageCapture = ImageCapture.Builder().setTargetAspectRatio(AspectRatio.RATIO_4_3).setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY).setFlashMode(ImageCapture.FLASH_MODE_OFF).build()
@@ -472,12 +484,13 @@ private fun latestRate(t: UiText, w: Watch): String {
                     // request and JPEG completion. The midpoint avoids assigning the
                     // long JPEG-processing delay to the photographed hand position.
                     val exposureAt = requestedAt + (completedAt - requestedAt) / 2
-                    val cropped = PhotoCropper.cropToTemplate(file.absolutePath, shape)
-                    captured(cropped, exposureAt)
+                    if (cameraActive.get()) captured(file.absolutePath, exposureAt)
+                    else file.delete()
                 }
                 override fun onError(exception: ImageCaptureException) { capturing = false }
             })
         }, modifier = Modifier.align(when (shutterPosition) { ShutterPosition.LEFT -> Alignment.BottomStart; ShutterPosition.CENTER -> Alignment.BottomCenter; ShutterPosition.RIGHT -> Alignment.BottomEnd }).navigationBarsPadding().padding(24.dp).size(76.dp), shape = CircleShape, colors = ButtonDefaults.buttonColors(containerColor = Color.White)) {}
+        if (capturing) ProcessingScreen(t)
     }
 }
 
@@ -511,19 +524,43 @@ private fun latestRate(t: UiText, w: Watch): String {
 
 @Composable private fun ReviewScreen(t: UiText, s: Screen.Review, retake: () -> Unit, save: (Int, Int, Int, DialLayout) -> Unit) {
     var h by remember { mutableStateOf(s.read.hour.takeIf { it >= 0 }?.toString().orEmpty()) }; var m by remember { mutableStateOf(s.read.minute.takeIf { it >= 0 }?.toString().orEmpty()) }; var sec by remember { mutableStateOf(s.read.second.takeIf { it >= 0 }?.toString().orEmpty()) }
+    var selectedRead by remember(s.path) { mutableStateOf(s.read) }
+    var suggestionRevision by remember(s.path) { mutableIntStateOf(0) }
+    var cloudSelected by remember(s.path) { mutableStateOf(false) }
+    var showPoints by remember(s.path) { mutableStateOf(true) }
     var layout by remember { mutableStateOf(s.read.layout) }; var layoutOpen by remember { mutableStateOf(false) }
     fun layoutName(value: DialLayout) = when (value) { DialLayout.CLASSIC -> t.layoutClassic; DialLayout.GMT -> t.layoutGmt; DialLayout.SMALL_SECONDS -> t.layoutSmallSeconds; DialLayout.CHRONOGRAPH -> t.layoutChronograph; DialLayout.REGULATOR -> t.layoutRegulator; DialLayout.JUMP_HOUR -> t.layoutJumpHour }
     val validTime = h.toIntOrNull()?.let { it in 0..23 } == true &&
         m.toIntOrNull()?.let { it in 0..59 } == true && sec.toIntOrNull()?.let { it in 0..59 } == true
     Scaffold(topBar = { AppHeader(t.measurementCheck, t.back, retake) }) { pad ->
         Column(Modifier.padding(pad).verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 10.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-            ManualDialPhoto(t, s.path, s.shape, s.capturedAt, s.read, layout, { h = it.toString() }, { m = it.toString() }, { sec = it.toString() })
+            key(s.path, selectedRead, suggestionRevision) {
+                ManualDialPhoto(t, s.path, s.shape, s.capturedAt, selectedRead, layout,
+                    { h = it.toString() }, { m = it.toString() }, { sec = it.toString() },
+                    if (!showPoints) t.manualTimeHint else if (cloudSelected) t.cloudHandSuggestion else t.aiHandSuggestion, showPoints)
+            }
             s.cloud?.let { cloud ->
+                val cloudTime = cloud.asReadTime(s.capturedAt)
                 Text(
-                    t.cloudAi + ": " + String.format(Locale.getDefault(), "%02d:%02d:%02d · %d %%", cloud.hour, cloud.minute, cloud.second, (cloud.confidence * 100).toInt()),
+                    t.cloudAi + " (" + cloud.model + "): " + String.format(Locale.getDefault(), "%02d:%02d:%02d", cloudTime.hour, cloudTime.minute, cloudTime.second),
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.secondary
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                Text(t.cloudUnverified, style = MaterialTheme.typography.bodySmall)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedButton(onClick = {
+                        suggestionRevision++
+                        selectedRead = cloudTime; cloudSelected = true; showPoints = true
+                        layout = DialLayout.CLASSIC
+                        h = cloudTime.hour.toString(); m = cloudTime.minute.toString(); sec = cloudTime.second.toString()
+                    }) { Text(t.useCloudSuggestion) }
+                    OutlinedButton(onClick = {
+                        suggestionRevision++
+                        selectedRead = s.read; cloudSelected = false; showPoints = true
+                        layout = s.read.layout
+                        h = s.read.hour.takeIf { it >= 0 }?.toString().orEmpty(); m = s.read.minute.takeIf { it >= 0 }?.toString().orEmpty(); sec = s.read.second.takeIf { it >= 0 }?.toString().orEmpty()
+                    }) { Text(t.useLocalSuggestion) }
+                }
             }
             s.cloudError?.let { error ->
                 Text("${t.cloudAi}: $error", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
@@ -531,7 +568,7 @@ private fun latestRate(t: UiText, w: Watch): String {
             Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(t.dialTime, style = MaterialTheme.typography.titleLarge, fontFamily = FontFamily.Serif)
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) { TimeInput(t.hours, h, { h = it }, Modifier.weight(1f)); TimeInput(t.minutes, m, { m = it }, Modifier.weight(1f)); TimeInput(t.seconds, sec, { sec = it }, Modifier.weight(1f)) }
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) { TimeInput(t.hours, h, { h = it; showPoints = false }, Modifier.weight(1f)); TimeInput(t.minutes, m, { m = it; showPoints = false }, Modifier.weight(1f)); TimeInput(t.seconds, sec, { sec = it; showPoints = false }, Modifier.weight(1f)) }
                 }
             }
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) { Icon(Icons.Default.KeyboardArrowDown, null, tint = MaterialTheme.colorScheme.primary); Text(t.moreDetails, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium) }
@@ -542,7 +579,7 @@ private fun latestRate(t: UiText, w: Watch): String {
                     HorizontalDivider(Modifier.padding(vertical = 4.dp))
                     Text(t.detectedLayout, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Box { OutlinedButton(onClick = { layoutOpen = true }, modifier = Modifier.fillMaxWidth()) { Text(layoutName(layout), modifier = Modifier.weight(1f)); Icon(Icons.Default.ArrowDropDown, null) }
-                        DropdownMenu(layoutOpen, { layoutOpen = false }) { DialLayout.entries.forEach { value -> DropdownMenuItem({ Text(layoutName(value)) }, { layout = value; layoutOpen = false }) } }
+                        DropdownMenu(layoutOpen, { layoutOpen = false }) { DialLayout.entries.forEach { value -> DropdownMenuItem({ Text(layoutName(value)) }, { layout = value; layoutOpen = false; showPoints = false }) } }
                     }
                     Text("${t.detectionConfidence}: ${(s.read.layoutConfidence * 100).toInt()} %", style = MaterialTheme.typography.bodySmall, color = if (s.read.layoutConfidence < .75f) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary)
                 }
@@ -552,7 +589,7 @@ private fun latestRate(t: UiText, w: Watch): String {
     }
 }
 
-@Composable private fun ManualDialPhoto(t: UiText, path: String, shape: DialShape, capturedAt: Long, read: ReadTime, layout: DialLayout, setHour: (Int) -> Unit, setMinute: (Int) -> Unit, setSecond: (Int) -> Unit) {
+@Composable private fun ManualDialPhoto(t: UiText, path: String, shape: DialShape, capturedAt: Long, read: ReadTime, layout: DialLayout, setHour: (Int) -> Unit, setMinute: (Int) -> Unit, setSecond: (Int) -> Unit, suggestionText: String, showPoints: Boolean) {
     val bitmap = remember(path) { BitmapFactory.decodeFile(path)?.asImageBitmap() }
     var center by remember(path) { mutableStateOf<Offset?>(null) }
     var hands by remember(path, layout) { mutableStateOf(emptyList<Offset>()) }
@@ -564,15 +601,23 @@ private fun latestRate(t: UiText, w: Watch): String {
     val usesSecondsSubdial = layout == DialLayout.SMALL_SECONDS || layout == DialLayout.CHRONOGRAPH
     val photoModifier = when (shape) { DialShape.ROUND -> Modifier.size(230.dp).clip(CircleShape); DialShape.SQUARE -> Modifier.size(230.dp).clip(RoundedCornerShape(18.dp)); DialShape.RECTANGLE -> Modifier.size(154.dp, 231.dp).clip(RoundedCornerShape(15.dp)) }
 
-    fun angle(origin: Offset, point: Offset) = (atan2((point.x - origin.x).toDouble(), (origin.y - point.y).toDouble()) * 180.0 / PI + 360.0) % 360.0
+    val projection = remember(read.geometry) { read.geometry?.projection() }
+    fun normalized(p: Offset) = DialPoint(p.x / viewSize.width.toDouble(), p.y / viewSize.height.toDouble())
+    fun angle(origin: Offset, point: Offset): Double {
+        val corrected = if (!usesSecondsSubdial) projection?.angle(normalized(origin), normalized(point)) else null
+        return corrected ?: ((atan2((point.x - origin.x).toDouble(), (origin.y - point.y).toDouble()) * 180.0 / PI + 360.0) % 360.0)
+    }
     fun updateTime(origin: Offset, secondsOrigin: Offset, points: List<Offset>) {
         if (points.size != 3) return
-        val minute = (angle(origin, points[1]) / 6.0).roundToInt() % 60
         val second = (angle(secondsOrigin, points[2]) / 6.0).roundToInt() % 60
+        val minute = if (projection != null && !usesSecondsSubdial)
+            (((angle(origin, points[1]) - second * .1 + 360) % 360) / 6.0).roundToInt() % 60
+        else (angle(origin, points[1]) / 6.0).roundToInt() % 60
         val hourAngle = angle(origin, points[0])
         val h12 = (((hourAngle - minute * .5 + 15.0) / 30.0).toInt() + 12) % 12
-        val reference = Calendar.getInstance().apply { timeInMillis = capturedAt }.get(Calendar.HOUR_OF_DAY)
-        val hour = listOf(h12, h12 + 12).minBy { kotlin.math.abs(it - reference) }
+        val ref = Calendar.getInstance().apply { timeInMillis = capturedAt }
+        val reference = ref.get(Calendar.HOUR_OF_DAY) * 3600 + ref.get(Calendar.MINUTE) * 60 + ref.get(Calendar.SECOND)
+        val hour = nearestDialHour(h12, minute, second, reference)
         setHour(hour); setMinute(minute); setSecond(second)
     }
     LaunchedEffect(viewSize, read, layout) {
@@ -587,7 +632,11 @@ private fun latestRate(t: UiText, w: Watch): String {
         val subdialOrigin = if (usesSecondsSubdial) Offset(viewSize.width * .5f, viewSize.height * .72f) else origin
         center = origin
         secondsCenter = subdialOrigin
-        hands = listOf(
+        hands = if (read.geometry != null && !usesSecondsSubdial) {
+            listOf(read.geometry.hourTip, read.geometry.minuteTip, read.geometry.secondTip).map {
+                Offset((it.x * viewSize.width).toFloat(), (it.y * viewSize.height).toFloat())
+            }
+        } else listOf(
             endpoint(origin, read.hourImageAngle, (read.hour % 12) * 30.0 + read.minute * .5, minDimension * .28f),
             endpoint(origin, read.minuteImageAngle, read.minute * 6.0, minDimension * .38f),
             endpoint(subdialOrigin, read.secondImageAngle, read.second * 6.0, minDimension * if (usesSecondsSubdial) .12f else .42f)
@@ -599,10 +648,11 @@ private fun latestRate(t: UiText, w: Watch): String {
             Text(t.handSetup, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
             Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.secondaryContainer, border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary)) { Text("AI", modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), color = MaterialTheme.colorScheme.primary) }
         }
-        Text(t.aiHandSuggestion, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth())
-        Box(photoModifier.onSizeChanged { viewSize = it }.pointerInput(path, viewSize, layout) {
+        Text(suggestionText, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth())
+        Box(photoModifier.onSizeChanged { viewSize = it }.pointerInput(path, viewSize, layout, showPoints) {
             awaitEachGesture {
                 val down = awaitFirstDown()
+                if (!showPoints) return@awaitEachGesture
                 val origin = latestCenter ?: return@awaitEachGesture
                 val secondsOrigin = if (usesSecondsSubdial) latestSecondsCenter ?: origin else origin
                 val candidates = buildList {
@@ -615,7 +665,7 @@ private fun latestRate(t: UiText, w: Watch): String {
                 drag(down.id) { change ->
                     val position = Offset(change.position.x.coerceIn(0f, size.width.toFloat()), change.position.y.coerceIn(0f, size.height.toFloat()))
                     when (selected.first) {
-                        0 -> { center = position; updateTime(position, secondsOrigin, latestHands) }
+                        0 -> { center = position; updateTime(position, if (usesSecondsSubdial) secondsOrigin else position, latestHands) }
                         4 -> { secondsCenter = position; updateTime(origin, position, latestHands) }
                         else -> {
                         val changed = latestHands.toMutableList()
@@ -630,11 +680,11 @@ private fun latestRate(t: UiText, w: Watch): String {
                 }
             }
         }) {
-            if (bitmap != null) Image(bitmap, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            if (bitmap != null) Image(bitmap, null, Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds)
             Canvas(Modifier.matchParentSize()) {
                 val colors = listOf(Color(0xFFD1AD68), Color(0xFF66BBFF), Color(0xFF66DD88), Color(0xFFFF665F))
                 val origin = center
-                if (origin != null) {
+                if (origin != null && showPoints) {
                     hands.forEachIndexed { index, point -> val color = colors[index + 1]; val lineOrigin = if (index == 2 && usesSecondsSubdial) secondsCenter ?: origin else origin; drawLine(color, lineOrigin, point, 3.dp.toPx()); drawCircle(Color.White, 10.dp.toPx(), point); drawCircle(color, 7.dp.toPx(), point) }
                     if (usesSecondsSubdial) secondsCenter?.let { sub -> drawCircle(Color.White, 9.dp.toPx(), sub); drawCircle(colors[3], 6.dp.toPx(), sub); drawCircle(Color.Black, 2.dp.toPx(), sub) }
                     drawCircle(Color.White, 10.dp.toPx(), origin); drawCircle(colors[0], 7.dp.toPx(), origin); drawCircle(Color.Black, 3.dp.toPx(), origin)
