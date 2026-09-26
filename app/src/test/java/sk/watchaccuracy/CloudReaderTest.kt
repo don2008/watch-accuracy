@@ -8,7 +8,7 @@ import kotlin.math.*
 
 class CloudReaderTest {
     private fun point(angle: Double, radius: Double) = JSONArray(listOf(.5 + sin(angle * PI / 180) * radius, .5 - cos(angle * PI / 180) * radius))
-    private fun reply(): JSONObject = JSONObject().put("readable", true).put("layout", "CLASSIC")
+    private fun reply(): JSONObject = JSONObject().put("readable", true).put("reason", "NONE").put("layout", "CLASSIC")
         .put("hour", 5).put("minute", 18).put("second", 21).put("center", JSONArray(listOf(.5, .5)))
         .put("hourTip", point(159.175, .22)).put("minuteTip", point(110.1, .35)).put("secondTip", point(126.0, .38))
         .put("markers", JSONArray().put(point(0.0, .43)).put(point(90.0, .43)).put(point(180.0, .43)).put(point(270.0, .43)))
@@ -46,6 +46,47 @@ class CloudReaderTest {
         assertTrue(error("unknown").contains("bez konkrétneho dôvodu"))
         val layoutError = CloudReader.parse(reply().put("layout", "SMALL_SECONDS").toString(), "test")
         assertTrue(layoutError.error.orEmpty().contains("nepodporovaný typ"))
+    }
+
+    private fun envelope(text: String, finish: String = "STOP") = JSONObject().put("candidates", JSONArray().put(
+        JSONObject().put("finishReason", finish).put("content", JSONObject().put("parts", JSONArray()
+            .put(JSONObject().put("thought", true).put("text", "private reasoning, not JSON"))
+            .put(JSONObject().put("text", text))))
+    )
+    @Test fun requestEnforcesTypesAndBoundsThroughApiSchema() {
+        val body = CloudReader.requestBody("test-image")
+        val format = body.getJSONObject("generationConfig").getJSONObject("responseFormat").getJSONObject("text")
+        assertEquals("application/json", format.getString("mimeType"))
+        val schema = format.getJSONObject("schema")
+        val properties = schema.getJSONObject("properties")
+        assertEquals(11, properties.getJSONObject("hour").getInt("maximum"))
+        assertEquals(59, properties.getJSONObject("second").getInt("maximum"))
+        assertEquals(2, properties.getJSONObject("center").getInt("minItems"))
+        assertEquals(4, properties.getJSONObject("markers").getInt("minItems"))
+        val required = schema.getJSONArray("required")
+        assertTrue((0 until required.length()).any { required.getString(it) == "center" })
+        assertFalse(schema.getBoolean("additionalProperties"))
+    }
+    @Test fun handlesFullApiEnvelopeAndDoesNotReadThinkingAsOutput() {
+        val result = CloudReader.parseResponse(envelope(reply().toString()), "test")
+        assertNotNull(result.reading)
+        assertEquals(18, result.reading!!.minute)
+    }
+    @Test fun distinguishesTruncationEmptyResponsesAndMissingFields() {
+        assertTrue(CloudReader.parseResponse(envelope(reply().toString(), "MAX_TOKENS"), "test").error.orEmpty().contains("limit dĺžky"))
+        assertNull(CloudReader.parseResponse(envelope(reply().toString(), "MAX_TOKENS"), "test").reading)
+        assertTrue(CloudReader.parseResponse(JSONObject(), "test").error.orEmpty().contains("žiadny návrh"))
+        assertTrue(CloudReader.parseResponse(envelope(""), "test").error.orEmpty().contains("prázdny"))
+        val incomplete = reply().apply { remove("center") }
+        assertTrue(CloudReader.parse(incomplete.toString(), "test").error.orEmpty().contains("stred osi"))
+        assertTrue(CloudReader.parse(reply().put("hour", 17).toString(), "test").error.orEmpty().contains("hodiny"))
+    }
+    @Test fun acceptsExplicitAbstentionWithNullCoordinates() {
+        val refusal = reply().put("readable", false).put("reason", "SECONDS_NOT_VISIBLE")
+        for (key in listOf("hour", "minute", "second", "center", "hourTip", "minuteTip", "secondTip", "markers")) refusal.put(key, JSONObject.NULL)
+        val result = CloudReader.parseResponse(envelope(refusal.toString()), "test")
+        assertNull(result.reading)
+        assertTrue(result.error.orEmpty().contains("sekundovú"))
     }
 
 }

@@ -42,4 +42,19 @@ class DialRimDetectorTest {
         assertNull(DialRimDetector.detect(size, size, flatMask))
         assertNull(DialRimDetector.detect(size, size, IntArray(size * size) { 120 }))
     }
+    @Test fun refusesCroppedDialWithOnlyTextHandsAndPartialArcs() {
+        val partial = IntArray(size * size) { i ->
+            val x = (i % size + .5) / size; val y = (i / size + .5) / size
+            when {
+                hypot(x - .5, y - .5) > .49 -> -1
+                x in .35.. .65 && y in .25.. .30 -> 20
+                abs(x - .5) < .01 && y in .12.. .8 -> 30
+                abs(y - .55 - .5 * (x - .5)) < .01 && x in .15.. .85 -> 30
+                x < .4 && abs(hypot(x - .37, y - .72) - .10) < .01 -> 20
+                else -> 180
+            }
+        }
+        assertNull(DialRimDetector.detect(size, size, partial))
+    }
+
 }

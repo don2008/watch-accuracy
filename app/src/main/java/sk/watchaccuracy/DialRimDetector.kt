@@ -19,23 +19,35 @@ object DialRimDetector {
         fun score(cx: Double, cy: Double, radius: Double, ratio: Double): Double {
             val edges = IntArray(36)
             var visible = 0
+            var rising = 0
+            var falling = 0
             for (i in edges.indices) {
                 var edge = -1
+                var signed = 0
                 for (delta in -2..2 step 2) {
                     val a = sample(cx + cosines[i] * (radius + delta - 2), cy + sines[i] * (radius + delta - 2) * ratio)
                     val b = sample(cx + cosines[i] * (radius + delta + 2), cy + sines[i] * (radius + delta + 2) * ratio)
-                    if (a >= 0 && b >= 0) edge = maxOf(edge, abs(a - b))
+                    if (a >= 0 && b >= 0 && abs(a - b) > edge) {
+                        edge = abs(a - b); signed = b - a
+                    }
                 }
                 if (edge >= 0) visible++
+                if (signed >= 10) rising++
+                if (signed <= -10) falling++
                 edges[i] = maxOf(0, edge)
             }
-            if (visible < 28) return 0.0
+            // A dial rim separates the same two surfaces around its circumference.
+            // Random logo/hand edges alternate polarity; an artificial alpha mask
+            // supplies no valid samples on its outer side.
+            if (visible < 28 || maxOf(rising, falling) < 27) return 0.0
             var sum = 0.0
             // Text, hands, glare and the reserve indicator affect isolated angles.
             // Require evidence throughout the rim, trimming outliers in each quadrant.
             for (quadrant in 0..3) {
                 val sector = edges.copyOfRange(quadrant * 9, quadrant * 9 + 9).sorted()
-                for (j in 2..6) sum += sector[j]
+                val sectorMean = (2..6).sumOf { sector[it] }.toDouble() / 5
+                if (sectorMean < 12) return 0.0
+                sum += sectorMean * 5
             }
             return sum / 20.0
         }

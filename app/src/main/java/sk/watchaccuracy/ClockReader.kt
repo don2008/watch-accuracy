@@ -17,7 +17,8 @@ data class ReadTime(
     val layout: DialLayout = DialLayout.CLASSIC, val layoutConfidence: Float = 0f,
     val hourImageAngle: Int = -1, val minuteImageAngle: Int = -1, val secondImageAngle: Int = -1,
     val centerX: Float = .5f, val centerY: Float = .5f,
-    val geometry: DialGeometry? = null
+    val geometry: DialGeometry? = null,
+    val centerDetected: Boolean = true
 )
 
 /** Offline learned hand classifier. No image or telemetry leaves the phone. */
@@ -78,12 +79,12 @@ object ClockReader {
         return ReadTime(
             hour, minute, second, timeScore.coerceIn(0f, 1f), layout.layout, layout.confidence,
             hourImageAngle, minuteImageAngle, secondImageAngle,
-            centerX, centerY
+            centerX, centerY, centerDetected = rim != null
         )
     }
 
     fun applyProfile(read: ReadTime, profile: WatchLearning): ReadTime {
-        if (profile.samples == 0 || profile.replayVersion < WATCH_LEARNING_VERSION) return read
+        if (!read.centerDetected || profile.samples == 0 || profile.replayVersion < WATCH_LEARNING_VERSION) return read
         val strength = minOf(1f, profile.samples / 3f)
         fun adjusted(angle: Int, offset: Float): Int = if (angle < 0) angle else ((angle + offset * strength).roundToInt() % 360 + 360) % 360
         val hourAngle = adjusted(read.hourImageAngle, profile.hourOffset)

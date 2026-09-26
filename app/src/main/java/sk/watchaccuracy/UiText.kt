@@ -29,7 +29,7 @@ data class UiText(
     val saveChanges: String, val longPressActions: String, val searchCatalog: String, val noCatalogMatches: String,
     val cloudAi: String, val geminiApiKey: String, val geminiApiKeyHelp: String, val saveApiKey: String, val processingPhoto: String,
     val cloudHandSuggestion: String, val cloudUnverified: String, val useCloudSuggestion: String,
-    val useLocalSuggestion: String, val manualTimeHint: String
+    val useLocalSuggestion: String, val uncertainCenterHint: String, val manualTimeHint: String
 )
 
 fun uiText(language: String) = if (language == "en") UiText(
@@ -63,6 +63,7 @@ fun uiText(language: String) = if (language == "en") UiText(
     cloudHandSuggestion="Gemini suggested these points. Check the actual pivot and all three hand tips. Drag to correct them.",
     cloudUnverified="Unconfirmed suggestion. Geometric agreement does not guarantee correct reading. Check the seconds hand and AM/PM.",
     useCloudSuggestion="Use Gemini", useLocalSuggestion="Use local AI",
+    uncertainCenterHint="The dial rim was not found reliably. The gold point is only the photo centre; move it onto the actual hand pivot before adjusting the hand tips.",
     manualTimeHint="Time entered manually. Hand markers are hidden to avoid showing a different suggestion."
 ) else UiText(
     watches="Hodinky", settings="Nastavenia", addWatch="Pridať hodinky", noWatches="Zatiaľ nemáte uložené žiadne hodinky",
@@ -95,5 +96,6 @@ fun uiText(language: String) = if (language == "en") UiText(
     cloudHandSuggestion="Body navrhlo Gemini. Skontrolujte skutočnú os a konce všetkých troch ručičiek. Body môžete posunúť.",
     cloudUnverified="Nepotvrdený návrh. Zhoda geometrie nezaručuje správne odčítanie. Skontrolujte sekundovku aj dopoludnie/popoludnie.",
     useCloudSuggestion="Použiť Gemini", useLocalSuggestion="Použiť lokálnu AI",
+    uncertainCenterHint="Okraj ciferníka sa nepodarilo spoľahlivo nájsť. Zlatý bod je len stred fotografie; presuňte ho na skutočnú os ručičiek a potom upravte ich konce.",
     manualTimeHint="Čas je zadaný ručne. Body sú skryté, aby nezobrazovali odlišný návrh."
 )

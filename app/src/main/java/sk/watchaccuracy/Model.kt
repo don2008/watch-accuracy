@@ -15,7 +15,7 @@ data class Watch(
     val learning: WatchLearning = WatchLearning()
 )
 
-const val WATCH_LEARNING_VERSION = 3
+const val WATCH_LEARNING_VERSION = 4
 
 data class WatchLearning(
     val samples: Int = 0,
@@ -29,7 +29,7 @@ data class WatchLearning(
     fun learn(read: ReadTime, hour: Int, minute: Int, second: Int, layout: DialLayout): WatchLearning {
         if (replayVersion < WATCH_LEARNING_VERSION) return WatchLearning().learn(read, hour, minute, second, layout)
         // A missing photo or an unreadable image must not count as a training sample.
-        if (read.hourImageAngle < 0 && read.minuteImageAngle < 0 && read.secondImageAngle < 0) {
+        if (!read.centerDetected || (read.hourImageAngle < 0 && read.minuteImageAngle < 0 && read.secondImageAngle < 0)) {
             return copy(preferredLayout = layout, replayVersion = WATCH_LEARNING_VERSION)
         }
         val alpha = if (samples == 0) 1f else .35f

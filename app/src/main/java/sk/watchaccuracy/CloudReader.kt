@@ -62,7 +62,7 @@ object CloudReader {
         return request(FALLBACK_MODEL, bytes, apiKey.trim())
     }
 
-    private fun request(model: String, imageBytes: ByteArray, apiKey: String): CloudReadResult {
+    internal fun requestBody(base64Image: String): JSONObject {
         val prompt = """
             Inspect this analog watch photograph using only visible evidence. Locate the actual
             pivot where the hands meet, not the image centre or brand logo. Account for dial
@@ -90,17 +90,43 @@ object CloudReader {
             3 does not hide the 15-minute track position if its ticks remain visible.
             This automatic geometry check supports CLASSIC central-seconds dials only.
             For any other layout, hidden or ambiguous hands, unreadable seconds, or missing
-            cardinal landmarks set readable=false, choose the specific reason, and omit
-            coordinates/time instead of guessing. If readable=true use reason=NONE.
+            cardinal landmarks set readable=false, choose the specific reason, and use
+            null for every time/coordinate field instead of guessing. Include all schema fields. If readable=true use reason=NONE.
             Return only JSON. Do not invent confidence percentages.
         """.trimIndent()
         val parts = JSONArray().put(JSONObject().put("text", prompt)).put(
             JSONObject().put("inline_data", JSONObject().put("mime_type", "image/jpeg")
-                .put("data", Base64.encodeToString(imageBytes, Base64.NO_WRAP)))
+                .put("data", base64Image))
         )
-        val body = JSONObject()
+        return JSONObject()
             .put("contents", JSONArray().put(JSONObject().put("parts", parts)))
-            .put("generationConfig", JSONObject().put("temperature", 0).put("responseMimeType", "application/json"))
+            .put("generationConfig", JSONObject().put("temperature", 0)
+                .put("responseFormat", JSONObject().put("text", JSONObject()
+                    .put("mimeType", "application/json").put("schema", responseSchema()))))
+    }
+
+    internal fun responseSchema(): JSONObject {
+        fun enumeration(vararg values: String) = JSONObject().put("type", "string").put("enum", JSONArray(values.toList()))
+        fun integer(maximum: Int) = JSONObject().put("type", JSONArray(listOf("integer", "null")))
+            .put("minimum", 0).put("maximum", maximum)
+        fun point(nullable: Boolean) = JSONObject()
+            .put("type", if (nullable) JSONArray(listOf("array", "null")) else "array")
+            .put("minItems", 2).put("maxItems", 2)
+            .put("items", JSONObject().put("type", "number").put("minimum", 0).put("maximum", 1))
+        val properties = JSONObject()
+            .put("readable", JSONObject().put("type", "boolean"))
+            .put("reason", enumeration("NONE", "AMBIGUOUS_HANDS", "SECONDS_NOT_VISIBLE", "LANDMARKS_NOT_VISIBLE", "UNSUPPORTED_LAYOUT"))
+            .put("layout", enumeration("CLASSIC", "GMT", "SMALL_SECONDS", "CHRONOGRAPH", "REGULATOR", "JUMP_HOUR", "UNKNOWN"))
+            .put("hour", integer(11)).put("minute", integer(59)).put("second", integer(59))
+            .put("center", point(true)).put("hourTip", point(true)).put("minuteTip", point(true)).put("secondTip", point(true))
+            .put("markers", JSONObject().put("type", JSONArray(listOf("array", "null")))
+                .put("minItems", 4).put("maxItems", 4).put("items", point(false)))
+        return JSONObject().put("type", "object").put("properties", properties).put("additionalProperties", false)
+            .put("required", JSONArray(listOf("readable", "reason", "layout", "hour", "minute", "second", "center", "hourTip", "minuteTip", "secondTip", "markers")))
+    }
+
+    private fun request(model: String, imageBytes: ByteArray, apiKey: String): CloudReadResult {
+        val body = requestBody(Base64.encodeToString(imageBytes, Base64.NO_WRAP))
         var connection: HttpURLConnection? = null
         return try {
             connection = URL(ENDPOINT_PREFIX + model + ":generateContent").openConnection() as HttpURLConnection
@@ -114,7 +140,8 @@ object CloudReader {
             if (code !in 200..299) {
                 // Do not echo arbitrary server messages or keys into the UI.
                 CloudReadResult(null, when (code) {
-                    400, 401, 403 -> "Gemini HTTP $code: skontrolujte API kľúč a oprávnenia projektu."
+                    400 -> "Gemini HTTP 400: služba odmietla požiadavku; môže ísť o jej formát alebo API kľúč."
+                    401, 403 -> "Gemini HTTP $code: skontrolujte API kľúč a oprávnenia projektu."
                     404 -> "Gemini HTTP 404: model nie je pre tento projekt dostupný."
                     429 -> "Gemini HTTP 429: prekročený limit požiadaviek alebo kvóta."
                     503 -> "Gemini HTTP 503: služba je dočasne preťažená."
@@ -122,14 +149,7 @@ object CloudReader {
                 }, code)
             } else {
                 val response = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
-                val responseParts = response.optJSONArray("candidates")?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")
-                val text = buildString {
-                    if (responseParts != null) for (i in 0 until responseParts.length()) {
-                        val part = responseParts.optJSONObject(i) ?: continue
-                        if (!part.optBoolean("thought", false)) append(part.optString("text", ""))
-                    }
-                }
-                parse(text, model)
+                parseResponse(response, model)
             }
         } catch (_: java.net.SocketTimeoutException) {
             CloudReadResult(null, "Gemini: vypršal čas čakania. Použite lokálny návrh alebo ručné odčítanie.")
@@ -140,44 +160,80 @@ object CloudReader {
         } finally { connection?.disconnect() }
     }
 
-    internal fun parse(text: String, model: String): CloudReadResult = try {
-        val json = JSONObject(text.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim())
-        val layout = json.optString("layout")
-        val reason = json.optString("reason")
-        val unsupported = layout in setOf("GMT", "SMALL_SECONDS", "CHRONOGRAPH", "REGULATOR", "JUMP_HOUR")
-        if (unsupported || reason == "UNSUPPORTED_LAYOUT") {
-            CloudReadResult(null, "Gemini označilo ciferník ako nepodporovaný typ (${if (unsupported) layout else "neurčený"}). Automatická kontrola podporuje tri centrálne ručičky; typ overte ručne.")
-        } else if (json.opt("readable") == false) {
-            CloudReadResult(null, when (reason) {
-                "SECONDS_NOT_VISIBLE" -> "Gemini nerozpoznalo sekundovú ručičku. Sekundy odčítajte ručne."
-                "LANDMARKS_NOT_VISIBLE" -> "Gemini nerozpoznalo orientačné body 12, 3, 6 a 9. Skontrolujte, či je viditeľný celý ciferník."
-                "AMBIGUOUS_HANDS" -> "Gemini nedokázalo rozlíšiť ručičky a ich protizávažia. Odčítajte čas ručne."
-                else -> "Gemini odmietlo automatické odčítanie bez konkrétneho dôvodu. Odčítajte čas ručne."
-            })
-        } else {
-            require(json.opt("readable") == true && layout == "CLASSIC")
-            fun integer(name: String, range: IntRange): Int {
-                val number = json.get(name) as? Number ?: error("Missing integer")
-                val n = number.toDouble()
-                require(n.isFinite() && n == number.toInt().toDouble() && number.toInt() in range)
-                return number.toInt()
+    internal fun parseResponse(response: JSONObject, model: String): CloudReadResult {
+        if (response.optJSONObject("promptFeedback")?.optString("blockReason").orEmpty().isNotBlank())
+            return CloudReadResult(null, "Gemini zablokovalo spracovanie fotografie.")
+        val candidate = response.optJSONArray("candidates")?.optJSONObject(0)
+            ?: return CloudReadResult(null, "Gemini neposlalo žiadny návrh odčítania.")
+        val finish = candidate.optString("finishReason")
+        if (finish == "MAX_TOKENS") return CloudReadResult(null, "Odpoveď Gemini bola prerušená pre limit dĺžky.")
+        if (finish.isNotBlank() && finish != "STOP") return CloudReadResult(null, "Gemini nedokončilo návrh odčítania.")
+        val parts = candidate.optJSONObject("content")?.optJSONArray("parts")
+        val text = buildString {
+            if (parts != null) for (i in 0 until parts.length()) {
+                val part = parts.optJSONObject(i) ?: continue
+                if (!part.optBoolean("thought", false)) append(part.optString("text", ""))
             }
-            fun point(a: JSONArray): DialPoint {
-                require(a.length() == 2)
-                val x = a.get(0) as? Number ?: error("Missing coordinate")
-                val y = a.get(1) as? Number ?: error("Missing coordinate")
-                return DialPoint(x.toDouble(), y.toDouble()).also { require(it.valid()) }
-            }
-            val h = integer("hour", 0..11); val m = integer("minute", 0..59); val s = integer("second", 0..59)
-            val markers = json.getJSONArray("markers")
-            require(markers.length() == 4)
-            val geometry = DialGeometry(point(json.getJSONArray("center")), point(json.getJSONArray("hourTip")),
-                point(json.getJSONArray("minuteTip")), point(json.getJSONArray("secondTip")),
-                (0..3).map { point(markers.getJSONArray(it)) })
-            if (geometry.matches(h, m, s)) CloudReadResult(CloudReading(h, m, s, geometry, model))
-            else CloudReadResult(null, "Návrh Gemini nesúhlasí s označenými ručičkami. Skontrolujte ciferník ručne.")
         }
-    } catch (_: Exception) {
-        CloudReadResult(null, "Gemini vrátilo neúplný alebo neplatný návrh. Skontrolujte ciferník ručne.")
+        if (text.isBlank()) return CloudReadResult(null, "Gemini poslalo prázdny návrh odčítania.")
+        return parse(text, model)
+    }
+
+    internal fun parse(text: String, model: String): CloudReadResult {
+        var field = "formát JSON"
+        return try {
+            val json = JSONObject(text.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim())
+            field = "typ ciferníka"
+            val layout = json.optString("layout")
+            val reason = json.optString("reason")
+            val unsupported = layout in setOf("GMT", "SMALL_SECONDS", "CHRONOGRAPH", "REGULATOR", "JUMP_HOUR")
+            if (unsupported || reason == "UNSUPPORTED_LAYOUT") {
+                CloudReadResult(null, "Gemini označilo ciferník ako nepodporovaný typ (${if (unsupported) layout else "neurčený"}). Automatická kontrola podporuje tri centrálne ručičky; typ overte ručne.")
+            } else if (json.opt("readable") == false) {
+                CloudReadResult(null, when (reason) {
+                    "SECONDS_NOT_VISIBLE" -> "Gemini nerozpoznalo sekundovú ručičku. Sekundy odčítajte ručne."
+                    "LANDMARKS_NOT_VISIBLE" -> "Gemini nerozpoznalo orientačné body 12, 3, 6 a 9. Skontrolujte, či je viditeľný celý ciferník."
+                    "AMBIGUOUS_HANDS" -> "Gemini nedokázalo rozlíšiť ručičky a ich protizávažia. Odčítajte čas ručne."
+                    else -> "Gemini odmietlo automatické odčítanie bez konkrétneho dôvodu. Odčítajte čas ručne."
+                })
+            } else {
+                require(layout == "CLASSIC")
+                field = "príznak čitateľnosti"
+                require(json.opt("readable") == true)
+                field = "dôvod odčítania"
+                require(reason == "NONE")
+                fun integer(name: String, range: IntRange): Int {
+                    field = when (name) { "hour" -> "hodiny"; "minute" -> "minúty"; else -> "sekundy" }
+                    val number = json.get(name) as? Number ?: error("Missing integer")
+                    val n = number.toDouble()
+                    require(n.isFinite() && n == number.toInt().toDouble() && number.toInt() in range)
+                    return number.toInt()
+                }
+                fun point(a: JSONArray): DialPoint {
+                    require(a.length() == 2)
+                    val x = a.get(0) as? Number ?: error("Missing coordinate")
+                    val y = a.get(1) as? Number ?: error("Missing coordinate")
+                    return DialPoint(x.toDouble(), y.toDouble()).also { require(it.valid()) }
+                }
+                val h = integer("hour", 0..11); val m = integer("minute", 0..59); val s = integer("second", 0..59)
+                fun namedPoint(key: String, label: String): DialPoint {
+                    field = label
+                    return point(json.getJSONArray(key))
+                }
+                val center = namedPoint("center", "stred osi")
+                val hourTip = namedPoint("hourTip", "koniec hodinovej ručičky")
+                val minuteTip = namedPoint("minuteTip", "koniec minútovej ručičky")
+                val secondTip = namedPoint("secondTip", "koniec sekundovej ručičky")
+                field = "orientačné body ciferníka"
+                val markers = json.getJSONArray("markers")
+                require(markers.length() == 4)
+                val geometry = DialGeometry(center, hourTip, minuteTip, secondTip, (0..3).map { point(markers.getJSONArray(it)) })
+                if (geometry.matches(h, m, s)) CloudReadResult(CloudReading(h, m, s, geometry, model))
+                else CloudReadResult(null, "Návrh Gemini nesúhlasí s označenými ručičkami. Skontrolujte ciferník ručne.")
+            }
+        } catch (_: Exception) {
+            // 'field' is always our fixed label, never model content or exception text.
+            CloudReadResult(null, "Gemini: chýbajúci alebo neplatný údaj – $field. Skontrolujte ciferník ručne.")
+        }
     }
 }

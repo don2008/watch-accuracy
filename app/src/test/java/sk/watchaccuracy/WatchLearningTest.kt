@@ -38,4 +38,13 @@ class WatchLearningTest {
         assertEquals(WATCH_LEARNING_VERSION, rebuilt.replayVersion)
     }
 
+    @Test fun guessedPhotoCentreIsNotUsedForLearningOrCorrection() {
+        val guessed = ReadTime(10, 20, 30, hourImageAngle = 310, minuteImageAngle = 120, secondImageAngle = 180, centerDetected = false)
+        val profile = WatchLearning(samples = 5, minuteOffset = 25f)
+        assertEquals(guessed, ClockReader.applyProfile(guessed, profile))
+        val unchanged = profile.learn(guessed, 10, 23, 31, DialLayout.CLASSIC)
+        assertEquals(profile.samples, unchanged.samples)
+        assertEquals(profile.minuteOffset, unchanged.minuteOffset, .001f)
+    }
+
 }

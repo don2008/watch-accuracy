@@ -542,7 +542,7 @@ private fun latestRate(t: UiText, w: Watch): String {
             key(s.path, selectedRead, suggestionRevision) {
                 ManualDialPhoto(t, s.path, s.shape, s.capturedAt, selectedRead, layout,
                     { h = it.toString() }, { m = it.toString() }, { sec = it.toString() },
-                    if (!showPoints) t.manualTimeHint else if (cloudSelected) t.cloudHandSuggestion else t.aiHandSuggestion, showPoints)
+                    if (!showPoints) t.manualTimeHint else if (cloudSelected) t.cloudHandSuggestion else if (!selectedRead.centerDetected) t.uncertainCenterHint else t.aiHandSuggestion, showPoints)
             }
             s.cloud?.let { cloud ->
                 val cloudTime = cloud.asReadTime(s.capturedAt)
