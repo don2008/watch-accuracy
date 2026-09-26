@@ -62,6 +62,7 @@ object CloudReader {
                     .put(JSONObject().put("inline_data", JSONObject()
                         .put("mime_type", "image/jpeg")
                         .put("data", Base64.encodeToString(imageBytes, Base64.NO_WRAP))))
+                )
             }))
             put("generationConfig", JSONObject().put("temperature", 0).put("responseMimeType", "application/json"))
         }.toString()
