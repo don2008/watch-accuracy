@@ -73,7 +73,16 @@ private sealed interface Screen {
     data class WatchDetail(val watchId: String) : Screen
     data class Templates(val watchId: String) : Screen
     data class Camera(val watchId: String, val shape: DialShape) : Screen
-    data class Review(val watchId: String, val shape: DialShape, val path: String, val capturedAt: Long, val read: ReadTime) : Screen
+    data class Review(
+        val watchId: String,
+        val shape: DialShape,
+        val path: String,
+        val capturedAt: Long,
+        /** Profile-corrected suggestion shown to the user. */
+        val read: ReadTime,
+        /** Uncorrected detector output used as the learning sample. */
+        val rawRead: ReadTime
+    ) : Screen
     data class Record(val watchId: String, val measurementId: String) : Screen
     data object Settings : Screen
 }
@@ -158,11 +167,16 @@ private fun WatchAccuracyApp() {
                     val isGmt = (watch.brand + " " + watch.model).contains("GMT", ignoreCase = true)
                     val rawRead = ClockReader.read(context, path, at, isKnownGmt = isGmt)
                     val read = ClockReader.applyProfile(rawRead, watch.learning)
-                    navigate(Screen.Review(s.watchId, s.shape, path, at, if (isGmt) read.copy(layout = DialLayout.GMT, layoutConfidence = 1f) else read))
+                    val suggested = if (isGmt) read.copy(layout = DialLayout.GMT, layoutConfidence = 1f) else read
+                    val raw = if (isGmt) rawRead.copy(layout = DialLayout.GMT, layoutConfidence = 1f) else rawRead
+                    navigate(Screen.Review(s.watchId, s.shape, path, at, suggested, raw))
                 }
                 is Screen.Review -> ReviewScreen(t, s, ::goBack) { h, m, sec, layout ->
                     val measurement = Measurement(capturedAtMillis = s.capturedAt, dialHour = h, dialMinute = m, dialSecond = sec, photoPath = s.path, shape = s.shape, layout = layout)
-                    watches = watches.map { watch -> if (watch.id == s.watchId) watch.copy(measurements = watch.measurements + measurement, learning = watch.learning.learn(s.read, h, m, sec, layout)) else watch }
+                    // Learn from the detector's original angles. Feeding the already
+                    // profile-corrected suggestion back into learn() makes the error
+                    // appear to be zero and prevents the profile from improving.
+                    watches = watches.map { watch -> if (watch.id == s.watchId) watch.copy(measurements = watch.measurements + measurement, learning = watch.learning.learn(s.rawRead, h, m, sec, layout)) else watch }
                     repo.save(watches); backStack = listOf(Screen.Watches, Screen.WatchDetail(s.watchId))
                 }
                 is Screen.Record -> RecordScreen(t, watches.first { it.id == s.watchId }, s.measurementId, ::goBack)

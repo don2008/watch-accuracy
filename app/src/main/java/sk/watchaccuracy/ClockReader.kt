@@ -25,7 +25,10 @@ object ClockReader {
         val bitmap = BitmapFactory.decodeFile(path) ?: return fallback(fallbackMillis)
         val layout = WatchLayoutClassifier.predict(context, bitmap)
         val model = runCatching { HandModel.load(context) }.getOrNull() ?: return fallback(fallbackMillis)
-        val bands = radialBands(bitmap)
+        // The camera template is only a framing aid. The watch can be translated
+        // inside it, so never use bitmap.width/2 and bitmap.height/2 as the pinion.
+        val dialCenter = detectDialCenter(bitmap)
+        val bands = radialBands(bitmap, dialCenter.first, dialCenter.second)
         val normalized = normalizeAngles(bands)
         val predictions = Array(360) { angle -> model.predict(features(normalized, angle)) }
         val reference = java.util.Calendar.getInstance().apply { timeInMillis = fallbackMillis }
@@ -54,7 +57,9 @@ object ClockReader {
         }
         val hourImageAngle = bestNear(expectedHourAngle + rotation, 5, 1)
         val minuteImageAngle = bestNear(expectedMinuteAngle + rotation, 6, 2)
-        val secondImageAngle = thinSecondHandAngle(bitmap, hourImageAngle, minuteImageAngle, isKnownGmt)
+        val secondImageAngle = thinSecondHandAngle(bitmap, hourImageAngle, minuteImageAngle, isKnownGmt, dialCenter.first, dialCenter.second)
+        val centerX = (dialCenter.first / bitmap.width).toFloat()
+        val centerY = (dialCenter.second / bitmap.height).toFloat()
         bitmap.recycle()
         val second = ((wrap(secondImageAngle - rotation) / 6.0).roundToInt()) % 60
         // Read the minute from the detected hand. The capture time is only a search
@@ -69,7 +74,8 @@ object ClockReader {
         val timeScore = (predictions[hourImageAngle][1] + predictions[minuteImageAngle][2] + predictions[secondImageAngle][3]) / 3f
         return ReadTime(
             hour, minute, second, timeScore.coerceIn(0f, 1f), layout.layout, layout.confidence,
-            hourImageAngle, minuteImageAngle, secondImageAngle, .5f, .5f
+            hourImageAngle, minuteImageAngle, secondImageAngle,
+            centerX, centerY
         )
     }
 
@@ -95,9 +101,8 @@ object ClockReader {
         return read.copy(hour = hour, minute = minute, second = second, layout = profile.preferredLayout ?: read.layout, hourImageAngle = hourAngle, minuteImageAngle = minuteAngle, secondImageAngle = secondAngle)
     }
 
-    private fun radialBands(bitmap: Bitmap): Array<FloatArray> {
+    private fun radialBands(bitmap: Bitmap, cx: Double, cy: Double): Array<FloatArray> {
         val result = Array(360) { FloatArray(3) }; val count = Array(360) { IntArray(3) }
-        val cx = bitmap.width / 2.0; val cy = bitmap.height / 2.0
         val radius = detectDialRadius(bitmap, cx, cy)
         for (angle in 0 until 360) {
             val rad = angle * PI / 180.0 - PI / 2
@@ -111,6 +116,60 @@ object ClockReader {
             for (b in 0..2) result[angle][b] /= count[angle][b].coerceAtLeast(1)
         }
         return result
+    }
+
+    /**
+     * Finds the geometric centre of the dial independently of the template.
+     * A translation of only a few percent is enough to corrupt hand angles if
+     * the bitmap centre is used. We search a bounded area around the crop centre
+     * and choose the candidate with the strongest, most coherent circular edge.
+     */
+    private fun detectDialCenter(bitmap: Bitmap): Pair<Double, Double> {
+        val size = minOf(bitmap.width, bitmap.height).toDouble()
+        val baseX = bitmap.width / 2.0
+        val baseY = bitmap.height / 2.0
+        val step = (size * .025).coerceAtLeast(2.0)
+        val limit = size * .16
+        var best = Pair(baseX, baseY)
+        var bestScore = Double.NEGATIVE_INFINITY
+        var dx = -limit
+        while (dx <= limit + .1) {
+            var dy = -limit
+            while (dy <= limit + .1) {
+                val cx = baseX + dx
+                val cy = baseY + dy
+                val score = circularEdgeScore(bitmap, cx, cy)
+                if (score > bestScore) {
+                    bestScore = score
+                    best = Pair(cx, cy)
+                }
+                dy += step
+            }
+            dx += step
+        }
+        return best
+    }
+
+    private fun circularEdgeScore(bitmap: Bitmap, cx: Double, cy: Double): Double {
+        val size = minOf(bitmap.width, bitmap.height).toDouble()
+        var best = 0.0
+        for (r in (size * .22).roundToInt()..(size * .39).roundToInt() step 2) {
+            var total = 0.0
+            var samples = 0
+            for (angle in 0 until 360 step 10) {
+                val rad = angle * PI / 180.0 - PI / 2
+                fun lum(radius: Int): Int {
+                    val x = (cx + cos(rad) * radius).roundToInt().coerceIn(0, bitmap.width - 1)
+                    val y = (cy + sin(rad) * radius).roundToInt().coerceIn(0, bitmap.height - 1)
+                    val p = bitmap.getPixel(x, y)
+                    return (Color.red(p) * 30 + Color.green(p) * 59 + Color.blue(p) * 11) / 100
+                }
+                total += kotlin.math.abs(lum(r + 2) - lum(r - 2))
+                samples++
+            }
+            best = maxOf(best, total / samples.coerceAtLeast(1))
+        }
+        return best
     }
 
     /** Finds the inner dial edge, not the crop/bezel edge. Watches often occupy only
@@ -142,9 +201,7 @@ object ClockReader {
 
     /** Scores a narrow line that is visible both near the pinion and at the outer
      * minute track. A GMT hand usually ends earlier and has a broad arrow tip. */
-    private fun thinSecondHandAngle(bitmap: Bitmap, hourAngle: Int, minuteAngle: Int, isKnownGmt: Boolean): Int {
-        val cx = bitmap.width / 2.0
-        val cy = bitmap.height / 2.0
+    private fun thinSecondHandAngle(bitmap: Bitmap, hourAngle: Int, minuteAngle: Int, isKnownGmt: Boolean, cx: Double, cy: Double): Int {
         val radius = detectDialRadius(bitmap, cx, cy)
         fun sample(angle: Int, r: Double): DoubleArray {
             val rad = wrap(angle) * PI / 180.0 - PI / 2
