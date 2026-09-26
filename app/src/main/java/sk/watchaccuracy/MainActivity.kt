@@ -396,7 +396,7 @@ private fun latestRate(t: UiText, w: Watch): String {
     val valid = hour.toIntOrNull()?.let { it in 0..23 } == true && minute.toIntOrNull()?.let { it in 0..59 } == true && second.toIntOrNull()?.let { it in 0..59 } == true
     AlertDialog(onDismissRequest = dismiss, title = { Text(t.editMeasurement) }, text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { TimeInput(t.hours, hour, { hour = it }, Modifier.weight(1f)); TimeInput(t.minutes, minute, { minute = it }, Modifier.weight(1f)); TimeInput(t.seconds, second, { second = it }, Modifier.weight(1f)) }
-        Box { OutlinedButton({ layoutOpen = true }, Modifier.fillMaxWidth()) { Text(layoutName(layout), Modifier.weight(1f)); Icon(Icons.Default.ArrowDropDown, null) }; DropdownMenu(layoutOpen, { layoutOpen = false }) { DialLayout.entries.forEach { value -> DropdownMenuItem({ Text(layoutName(value)) }, { layout = value; layoutOpen = false; showPoints = false }) } } }
+        Box { OutlinedButton({ layoutOpen = true }, Modifier.fillMaxWidth()) { Text(layoutName(layout), Modifier.weight(1f)); Icon(Icons.Default.ArrowDropDown, null) }; DropdownMenu(layoutOpen, { layoutOpen = false }) { DialLayout.entries.forEach { value -> DropdownMenuItem({ Text(layoutName(value)) }, { layout = value; layoutOpen = false }) } } }
     } }, confirmButton = { TextButton({ save(measurement.copy(dialHour = hour.toInt(), dialMinute = minute.toInt(), dialSecond = second.toInt(), layout = layout)) }, enabled = valid) { Text(t.saveChanges) } }, dismissButton = { TextButton(dismiss) { Text(t.cancel) } })
 }
 
