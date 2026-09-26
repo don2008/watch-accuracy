@@ -36,4 +36,16 @@ class CloudReaderTest {
         assertNull(CloudReader.parse("{}", "test").reading)
         assertNull(CloudReader.parse("not JSON", "test").reading)
     }
+    @Test fun reportsRefusalReasonsWithoutCallingEveryFailureUnrecognisedHands() {
+        fun error(reason: String) = CloudReader.parse(
+            JSONObject().put("readable", false).put("layout", "CLASSIC").put("reason", reason).toString(), "test"
+        ).error.orEmpty()
+        assertTrue(error("SECONDS_NOT_VISIBLE").contains("sekundovú"))
+        assertTrue(error("LANDMARKS_NOT_VISIBLE").contains("orientačné body"))
+        assertTrue(error("AMBIGUOUS_HANDS").contains("protizávažia"))
+        assertTrue(error("unknown").contains("bez konkrétneho dôvodu"))
+        val layoutError = CloudReader.parse(reply().put("layout", "SMALL_SECONDS").toString(), "test")
+        assertTrue(layoutError.error.orEmpty().contains("nepodporovaný typ"))
+    }
+
 }

@@ -76,14 +76,22 @@ object CloudReader {
             Locate 12,3,6,9 on the SAME minute-track circle, not the bezel or tips of indices.
             Return a JSON object with:
             readable: boolean,
+            reason: one of NONE, AMBIGUOUS_HANDS, SECONDS_NOT_VISIBLE, LANDMARKS_NOT_VISIBLE, UNSUPPORTED_LAYOUT,
             layout: one of CLASSIC, GMT, SMALL_SECONDS, CHRONOGRAPH, REGULATOR, JUMP_HOUR,
             hour: integer 0..11 (12 becomes 0; AM/PM cannot be read from a 12-hour dial),
             minute: integer 0..59, second: integer 0..59,
             center: [x,y], hourTip: [x,y], minuteTip: [x,y], secondTip: [x,y],
             markers: [[x12,y12],[x3,y3],[x6,y6],[x9,y9]].
+            CLASSIC means hour, minute and seconds share one pivot. A date window,
+            a power-reserve arc with its own pointer, or a Spring Drive movement DOES NOT
+            change that layout. In particular, a Grand Seiko with central seconds plus
+            a power-reserve gauge is CLASSIC, not SMALL_SECONDS or REGULATOR.
+            Cardinal points lie on the minute track: a date window replacing the numeral
+            3 does not hide the 15-minute track position if its ticks remain visible.
             This automatic geometry check supports CLASSIC central-seconds dials only.
             For any other layout, hidden or ambiguous hands, unreadable seconds, or missing
-            cardinal landmarks set readable=false and omit coordinates/time instead of guessing.
+            cardinal landmarks set readable=false, choose the specific reason, and omit
+            coordinates/time instead of guessing. If readable=true use reason=NONE.
             Return only JSON. Do not invent confidence percentages.
         """.trimIndent()
         val parts = JSONArray().put(JSONObject().put("text", prompt)).put(
@@ -134,9 +142,20 @@ object CloudReader {
 
     internal fun parse(text: String, model: String): CloudReadResult = try {
         val json = JSONObject(text.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim())
-        if (json.opt("readable") != true || json.optString("layout") != "CLASSIC") {
-            CloudReadResult(null, "Gemini nedokázalo spoľahlivo určiť všetky ručičky. Odčítajte ich ručne.")
+        val layout = json.optString("layout")
+        val reason = json.optString("reason")
+        val unsupported = layout in setOf("GMT", "SMALL_SECONDS", "CHRONOGRAPH", "REGULATOR", "JUMP_HOUR")
+        if (unsupported || reason == "UNSUPPORTED_LAYOUT") {
+            CloudReadResult(null, "Gemini označilo ciferník ako nepodporovaný typ (${if (unsupported) layout else "neurčený"}). Automatická kontrola podporuje tri centrálne ručičky; typ overte ručne.")
+        } else if (json.opt("readable") == false) {
+            CloudReadResult(null, when (reason) {
+                "SECONDS_NOT_VISIBLE" -> "Gemini nerozpoznalo sekundovú ručičku. Sekundy odčítajte ručne."
+                "LANDMARKS_NOT_VISIBLE" -> "Gemini nerozpoznalo orientačné body 12, 3, 6 a 9. Skontrolujte, či je viditeľný celý ciferník."
+                "AMBIGUOUS_HANDS" -> "Gemini nedokázalo rozlíšiť ručičky a ich protizávažia. Odčítajte čas ručne."
+                else -> "Gemini odmietlo automatické odčítanie bez konkrétneho dôvodu. Odčítajte čas ručne."
+            })
         } else {
+            require(json.opt("readable") == true && layout == "CLASSIC")
             fun integer(name: String, range: IntRange): Int {
                 val number = json.get(name) as? Number ?: error("Missing integer")
                 val n = number.toDouble()

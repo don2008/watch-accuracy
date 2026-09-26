@@ -28,4 +28,14 @@ class WatchLearningTest {
         // an unconstrained detector error.
         assertTrue(updated.hourOffset < 60f)
     }
+    @Test fun oldCentreCorrectionsAreNotAppliedToNewDetector() {
+        val raw = ReadTime(10, 20, 30, hourImageAngle = 310, minuteImageAngle = 120, secondImageAngle = 180)
+        val old = WatchLearning(samples = 25, minuteOffset = 30f, secondOffset = -30f, replayVersion = 2)
+        assertEquals(raw, ClockReader.applyProfile(raw, old))
+        val rebuilt = old.learn(raw, 10, 20, 30, DialLayout.CLASSIC)
+        assertEquals(1, rebuilt.samples)
+        assertEquals(0f, rebuilt.minuteOffset, .001f)
+        assertEquals(WATCH_LEARNING_VERSION, rebuilt.replayVersion)
+    }
+
 }

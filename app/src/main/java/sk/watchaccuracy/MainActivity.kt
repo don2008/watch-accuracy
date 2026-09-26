@@ -119,10 +119,10 @@ private fun WatchAccuracyApp() {
     // once per watch (replayVersion) and never changes the stored measurements.
     LaunchedEffect(Unit) {
         val initial = watches
-        if (initial.any { it.learning.replayVersion < 2 && it.measurements.isNotEmpty() }) {
+        if (initial.any { it.learning.replayVersion < WATCH_LEARNING_VERSION && it.measurements.isNotEmpty() }) {
             val rebuilt = withContext(Dispatchers.Default) {
                 initial.map { watch ->
-                    if (watch.learning.replayVersion >= 2) watch
+                    if (watch.learning.replayVersion >= WATCH_LEARNING_VERSION) watch
                     else {
                         val isGmt = (watch.brand + " " + watch.model).contains("GMT", ignoreCase = true)
                         val profile = watch.measurements.sortedBy { it.capturedAtMillis }.fold(WatchLearning()) { learned, measurement ->
@@ -133,8 +133,13 @@ private fun WatchAccuracyApp() {
                     }
                 }
             }
-            watches = rebuilt
-            repo.save(rebuilt)
+            // A user may save/edit/delete a watch while replay runs. Never overwrite it.
+            val originals = initial.associateBy { it.id }
+            val profiles = rebuilt.associateBy { it.id }
+            watches = watches.map { current ->
+                if (current == originals[current.id]) profiles[current.id] ?: current else current
+            }
+            repo.save(watches)
         }
     }
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
@@ -599,7 +604,8 @@ private fun latestRate(t: UiText, w: Watch): String {
     val latestHands by rememberUpdatedState(hands)
     val latestSecondsCenter by rememberUpdatedState(secondsCenter)
     val usesSecondsSubdial = layout == DialLayout.SMALL_SECONDS || layout == DialLayout.CHRONOGRAPH
-    val photoModifier = when (shape) { DialShape.ROUND -> Modifier.size(230.dp).clip(CircleShape); DialShape.SQUARE -> Modifier.size(230.dp).clip(RoundedCornerShape(18.dp)); DialShape.RECTANGLE -> Modifier.size(154.dp, 231.dp).clip(RoundedCornerShape(15.dp)) }
+    val photoModifier = when (shape) { DialShape.RECTANGLE -> Modifier.size(180.dp, 270.dp); else -> Modifier.size(270.dp) }
+    val photoShape = when (shape) { DialShape.ROUND -> CircleShape; else -> RoundedCornerShape(18.dp) }
 
     val projection = remember(read.geometry) { read.geometry?.projection() }
     fun normalized(p: Offset) = DialPoint(p.x / viewSize.width.toDouble(), p.y / viewSize.height.toDouble())
@@ -680,7 +686,7 @@ private fun latestRate(t: UiText, w: Watch): String {
                 }
             }
         }) {
-            if (bitmap != null) Image(bitmap, null, Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds)
+            if (bitmap != null) Image(bitmap, null, Modifier.fillMaxSize().clip(photoShape), contentScale = ContentScale.FillBounds)
             Canvas(Modifier.matchParentSize()) {
                 val colors = listOf(Color(0xFFD1AD68), Color(0xFF66BBFF), Color(0xFF66DD88), Color(0xFFFF665F))
                 val origin = center
