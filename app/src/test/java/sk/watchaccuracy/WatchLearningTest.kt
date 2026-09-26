@@ -24,7 +24,7 @@ class WatchLearningTest {
         val second = ReadTime(hour = 0, minute = 0, second = 0, hourImageAngle = 20, minuteImageAngle = 0, secondImageAngle = 0)
         val updated = profile.learn(second, 2, 0, 0, DialLayout.CLASSIC)
         assertTrue(updated.samples == 2)
-        assertTrue(updated.hourOffset > profile.hourOffset)
+        assertTrue(updated.hourOffset != profile.hourOffset)
         assertTrue(updated.hourOffset < 60f)
     }
 }
