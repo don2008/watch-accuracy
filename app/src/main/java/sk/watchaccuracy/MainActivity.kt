@@ -85,7 +85,8 @@ private sealed interface Screen {
         val read: ReadTime,
         /** Uncorrected detector output used as the learning sample. */
         val rawRead: ReadTime,
-        val cloud: CloudReading? = null
+        val cloud: CloudReading? = null,
+        val cloudError: String? = null
     ) : Screen
     data class Record(val watchId: String, val measurementId: String) : Screen
     data object Settings : Screen
@@ -199,10 +200,10 @@ private fun WatchAccuracyApp() {
                     val suggested = if (isGmt) read.copy(layout = DialLayout.GMT, layoutConfidence = 1f) else read
                     val raw = if (isGmt) rawRead.copy(layout = DialLayout.GMT, layoutConfidence = 1f) else rawRead
                     cloudScope.launch(Dispatchers.IO) {
-                        val cloud = CloudReader.read(path, geminiApiKey)
+                        val cloudResult = CloudReader.readDetailed(path, geminiApiKey)
                         withContext(Dispatchers.Main) {
-                            val cloudRead = cloud?.let { suggested.copy(hour = it.hour, minute = it.minute, second = it.second) } ?: suggested
-                            navigate(Screen.Review(s.watchId, s.shape, path, at, cloudRead, raw, cloud))
+                            val cloudRead = cloudResult.reading?.let { suggested.copy(hour = it.hour, minute = it.minute, second = it.second) } ?: suggested
+                            navigate(Screen.Review(s.watchId, s.shape, path, at, cloudRead, raw, cloudResult.reading, cloudResult.error?.takeIf { geminiApiKey.isNotBlank() }))
                         }
                     }
                 }
@@ -510,6 +511,9 @@ private fun latestRate(t: UiText, w: Watch): String {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.secondary
                 )
+            }
+            s.cloudError?.let { error ->
+                Text("${t.cloudAi}: $error", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
             }
             Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {

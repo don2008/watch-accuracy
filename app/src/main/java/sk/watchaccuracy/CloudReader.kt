@@ -1,6 +1,9 @@
 package sk.watchaccuracy
 
 import android.util.Base64
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import java.io.ByteArrayOutputStream
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -13,15 +16,26 @@ data class CloudReading(
     val confidence: Float
 )
 
+data class CloudReadResult(val reading: CloudReading?, val error: String? = null)
+
 object CloudReader {
     private const val MODEL = "gemini-2.5-flash"
     private const val ENDPOINT_PREFIX = "https://generativelanguage.googleapis.com/v1beta/models/"
 
-    fun read(path: String, apiKey: String): CloudReading? = runCatching {
-        if (apiKey.isBlank()) return null
+    fun read(path: String, apiKey: String): CloudReading? = readDetailed(path, apiKey).reading
+
+    fun readDetailed(path: String, apiKey: String): CloudReadResult {
+        if (apiKey.isBlank()) return CloudReadResult(null, "API kľúč nie je zadaný")
         val file = java.io.File(path)
-        if (!file.isFile || file.length() > 8L * 1024L * 1024L) return null
-        val mime = if (path.endsWith(".png", true)) "image/png" else "image/jpeg"
+        if (!file.isFile) return CloudReadResult(null, "Fotografia sa nenašla")
+        val imageBytes = runCatching {
+            val source = BitmapFactory.decodeFile(path) ?: return@runCatching file.readBytes()
+            val scale = minOf(1f, 1600f / maxOf(source.width, source.height).toFloat())
+            val bitmap = if (scale < 1f) Bitmap.createScaledBitmap(source, (source.width * scale).toInt(), (source.height * scale).toInt(), true) else source
+            ByteArrayOutputStream().use { out -> bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out); if (bitmap !== source) bitmap.recycle(); source.recycle(); out.toByteArray() }
+        }.getOrElse { return CloudReadResult(null, "Fotografiu sa nepodarilo pripraviť") }
+        return runCatching {
+        val mime = "image/jpeg"
         val prompt = "You read a mechanical analog watch dial from the attached image. " +
             "Return ONLY JSON: {\"hour\":0,\"minute\":0,\"second\":0,\"confidence\":0.0}. " +
             "Use hour 0..23 and minute/second 0..59. Read the hands from the dial; " +
@@ -34,7 +48,7 @@ object CloudReader {
                     .put(JSONObject().put("text", prompt))
                     .put(JSONObject().put("inline_data", JSONObject()
                         .put("mime_type", mime)
-                        .put("data", Base64.encodeToString(file.readBytes(), Base64.NO_WRAP))))
+                        .put("data", Base64.encodeToString(imageBytes, Base64.NO_WRAP))))
                 )
             }))
             put("generationConfig", JSONObject().put("temperature", 0).put("responseMimeType", "application/json"))
@@ -48,7 +62,10 @@ object CloudReader {
             setRequestProperty("Content-Type", "application/json")
         }
         connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
-        if (connection.responseCode !in 200..299) return null
+        if (connection.responseCode !in 200..299) {
+            val detail = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            return CloudReadResult(null, "Gemini HTTP ${connection.responseCode}" + if (detail.isBlank()) "" else ": $detail")
+        }
         val response = connection.inputStream.bufferedReader().use { it.readText() }
         val text = JSONObject(response).getJSONArray("candidates").getJSONObject(0)
             .getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text")
@@ -56,11 +73,12 @@ object CloudReader {
             .removePrefix("\u0060\u0060\u0060json")
             .removePrefix("\u0060\u0060\u0060")
             .removeSuffix("\u0060\u0060\u0060").trim())
-        CloudReading(
+        CloudReadResult(CloudReading(
             json.getInt("hour").coerceIn(0, 23),
             json.getInt("minute").coerceIn(0, 59),
             json.getInt("second").coerceIn(0, 59),
             json.optDouble("confidence", .5).toFloat().coerceIn(0f, 1f)
-        )
-    }.getOrNull()
+        ))
+    }.getOrElse { CloudReadResult(null, "Gemini: ${it.message ?: "neznáma chyba"}") }
+    }
 }
