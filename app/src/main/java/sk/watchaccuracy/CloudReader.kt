@@ -19,7 +19,9 @@ data class CloudReading(
 data class CloudReadResult(val reading: CloudReading?, val error: String? = null)
 
 object CloudReader {
-    private const val MODEL = "gemini-2.5-flash"
+    // Google currently limits Gemini 2.5 Flash to existing users/projects.
+    // Gemini 3.8 Flash is the compatible current model for new API keys.
+    private const val MODEL = "gemini-3.8-flash"
     private const val ENDPOINT_PREFIX = "https://generativelanguage.googleapis.com/v1beta/models/"
 
     fun read(path: String, apiKey: String): CloudReading? = readDetailed(path, apiKey).reading
