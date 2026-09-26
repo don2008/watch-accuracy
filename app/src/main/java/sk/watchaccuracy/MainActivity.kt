@@ -67,7 +67,6 @@ import kotlin.math.roundToInt
 import android.view.MotionEvent
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private sealed interface Screen {
@@ -76,6 +75,7 @@ private sealed interface Screen {
     data class WatchDetail(val watchId: String) : Screen
     data class Templates(val watchId: String) : Screen
     data class Camera(val watchId: String, val shape: DialShape) : Screen
+    data class Processing(val watchId: String, val shape: DialShape, val path: String, val capturedAt: Long) : Screen
     data class Review(
         val watchId: String,
         val shape: DialShape,
@@ -113,7 +113,6 @@ private fun WatchAccuracyApp() {
     var shutterPosition by remember { mutableStateOf(repo.shutterPosition()) }
     var geminiApiKey by remember { mutableStateOf(repo.geminiApiKey()) }
     var transferMessage by remember { mutableStateOf<String?>(null) }
-    val cloudScope = rememberCoroutineScope()
     val t = uiText(language)
     // Rebuild profiles created by older app versions from the authoritative data:
     // the saved photograph plus the manually confirmed dial time. This is done
@@ -193,19 +192,24 @@ private fun WatchAccuracyApp() {
                 )
                 is Screen.Templates -> TemplateScreen(t, ::goBack) { navigate(Screen.Camera(s.watchId, it)) }
                 is Screen.Camera -> CameraScreen(t, s.shape, shutterPosition, ::goBack) { path, at ->
-                    val watch = watches.first { it.id == s.watchId }
-                    val isGmt = (watch.brand + " " + watch.model).contains("GMT", ignoreCase = true)
-                    val rawRead = ClockReader.read(context, path, at, isKnownGmt = isGmt)
-                    val read = ClockReader.applyProfile(rawRead, watch.learning)
-                    val suggested = if (isGmt) read.copy(layout = DialLayout.GMT, layoutConfidence = 1f) else read
-                    val raw = if (isGmt) rawRead.copy(layout = DialLayout.GMT, layoutConfidence = 1f) else rawRead
-                    cloudScope.launch(Dispatchers.IO) {
-                        val cloudResult = CloudReader.readDetailed(path, geminiApiKey)
-                        withContext(Dispatchers.Main) {
+                    navigate(Screen.Processing(s.watchId, s.shape, path, at))
+                }
+                is Screen.Processing -> {
+                    LaunchedEffect(s.path) {
+                        val result = withContext(Dispatchers.IO) {
+                            val watch = watches.first { it.id == s.watchId }
+                            val isGmt = (watch.brand + " " + watch.model).contains("GMT", ignoreCase = true)
+                            val rawRead = ClockReader.read(context, s.path, s.capturedAt, isKnownGmt = isGmt)
+                            val read = ClockReader.applyProfile(rawRead, watch.learning)
+                            val suggested = if (isGmt) read.copy(layout = DialLayout.GMT, layoutConfidence = 1f) else read
+                            val raw = if (isGmt) rawRead.copy(layout = DialLayout.GMT, layoutConfidence = 1f) else rawRead
+                            val cloudResult = CloudReader.readDetailed(s.path, geminiApiKey)
                             val cloudRead = cloudResult.reading?.let { suggested.copy(hour = it.hour, minute = it.minute, second = it.second) } ?: suggested
-                            navigate(Screen.Review(s.watchId, s.shape, path, at, cloudRead, raw, cloudResult.reading, cloudResult.error?.takeIf { geminiApiKey.isNotBlank() }))
+                            Screen.Review(s.watchId, s.shape, s.path, s.capturedAt, cloudRead, raw, cloudResult.reading, cloudResult.error?.takeIf { geminiApiKey.isNotBlank() })
                         }
+                        navigate(result)
                     }
+                    ProcessingScreen(t)
                 }
                 is Screen.Review -> ReviewScreen(t, s, ::goBack) { h, m, sec, layout ->
                     val measurement = Measurement(capturedAtMillis = s.capturedAt, dialHour = h, dialMinute = m, dialSecond = sec, photoPath = s.path, shape = s.shape, layout = layout)
@@ -263,6 +267,15 @@ private fun WatchAccuracyApp() {
 private fun latestRate(t: UiText, w: Watch): String {
     val v = DeviationCalculator.latestSecondsPerDay(w.measurements) ?: return "—"
     return String.format(Locale.getDefault(), "%+.1f %s", v, t.secondsPerDay)
+}
+
+@Composable private fun ProcessingScreen(t: UiText) {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(18.dp)) {
+            CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+            Text(t.processingPhoto, style = MaterialTheme.typography.titleMedium)
+        }
+    }
 }
 
 @Composable private fun AddWatchScreen(t: UiText, watches: List<Watch>, back: () -> Unit, save: (String, String) -> Unit) {
