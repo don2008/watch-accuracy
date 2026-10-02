@@ -342,8 +342,8 @@ object CloudReader {
                     secondCenter = secondsCenter.takeIf { parsedLayout == DialLayout.SMALL_SECONDS || parsedLayout == DialLayout.CHRONOGRAPH },
                     markers = (0..3).map { point(markers.getJSONArray(it)) }
                 )
-                if (geometry.matches(h, m, s)) CloudReadResult(CloudReading(h, m, s, geometry, model, parsedLayout))
-                else CloudReadResult(null, "Návrh Gemini nesúhlasí s označenými ručičkami. Skontrolujte ciferník ručne.")
+                if (geometry.plausible()) CloudReadResult(CloudReading(h, m, s, geometry, model, parsedLayout))
+                else CloudReadResult(null, "Gemini neposlalo použiteľné umiestnenie ručičiek. Skontrolujte ciferník ručne.")
             }
         } catch (_: Exception) {
             // 'field' is always our fixed label, never model content or exception text.
