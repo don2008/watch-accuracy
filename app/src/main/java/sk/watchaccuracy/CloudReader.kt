@@ -114,8 +114,11 @@ object CloudReader {
         )
         val generationConfig = JSONObject().put("temperature", 0)
         if (legacySchema) {
+            // Compatibility mode deliberately omits a schema. Different Gemini
+            // model generations accept different schema dialects/field names.
+            // The response is still required to be JSON and is strictly
+            // validated by parse() before any value reaches the UI.
             generationConfig.put("responseMimeType", "application/json")
-                .put("responseJsonSchema", responseSchema())
         } else {
             generationConfig.put("responseFormat", JSONObject().put("text", JSONObject()
                 .put("mimeType", "application/json").put("schema", responseSchema())))
