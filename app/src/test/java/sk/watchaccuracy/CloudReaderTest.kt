@@ -52,7 +52,7 @@ class CloudReaderTest {
         JSONObject().put("finishReason", finish).put("content", JSONObject().put("parts", JSONArray()
             .put(JSONObject().put("thought", true).put("text", "private reasoning, not JSON"))
             .put(JSONObject().put("text", text))))
-    )
+    ))
     @Test fun requestEnforcesTypesAndBoundsThroughApiSchema() {
         val body = CloudReader.requestBody("test-image")
         val format = body.getJSONObject("generationConfig").getJSONObject("responseFormat").getJSONObject("text")
