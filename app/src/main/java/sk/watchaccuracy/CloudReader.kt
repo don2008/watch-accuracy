@@ -15,13 +15,15 @@ import java.util.Calendar
 /** A separate, unconfirmed suggestion. Geometry must agree before it can be applied. */
 data class CloudReading(
     val hour: Int, val minute: Int, val second: Int,
-    val geometry: DialGeometry, val model: String
+    val geometry: DialGeometry, val model: String,
+    val layout: DialLayout = DialLayout.CLASSIC
 ) {
     fun asReadTime(referenceMillis: Long): ReadTime {
         val reference = Calendar.getInstance().apply { timeInMillis = referenceMillis }
         val secondsOfDay = reference.get(Calendar.HOUR_OF_DAY) * 3600 + reference.get(Calendar.MINUTE) * 60 + reference.get(Calendar.SECOND)
         return ReadTime(
             nearestDialHour(hour, minute, second, secondsOfDay), minute, second,
+            layout = layout, layoutConfidence = 1f,
             centerX = geometry.center.x.toFloat(), centerY = geometry.center.y.toFloat(),
             geometry = geometry
         )
@@ -98,17 +100,24 @@ object CloudReader {
             hour: integer 0..11 (12 becomes 0; AM/PM cannot be read from a 12-hour dial),
             minute: integer 0..59, second: integer 0..59,
             center: [x,y], hourTip: [x,y], minuteTip: [x,y], secondTip: [x,y],
-            markers: [[x12,y12],[x3,y3],[x6,y6],[x9,y9]].
-            CLASSIC means hour, minute and seconds share one pivot. A date window,
-            a power-reserve arc with its own pointer, or a Spring Drive movement DOES NOT
-            change that layout. In particular, a Grand Seiko with central seconds plus
-            a power-reserve gauge is CLASSIC, not SMALL_SECONDS or REGULATOR.
-            Cardinal points lie on the minute track: a date window replacing the numeral
+            secondsCenter: [x,y], markers: [[x12,y12],[x3,y3],[x6,y6],[x9,y9]].
+            CLASSIC means hour, minute and running seconds share one pivot. GMT also uses
+            the main pivot: read the ordinary local hour hand, not the 24-hour GMT hand.
+            For SMALL_SECONDS and CHRONOGRAPH, secondsCenter MUST be the pivot of the
+            continuously running seconds subdial and secondTip its seconds hand. On a
+            chronograph, the long central chronograph hand and the elapsed-minute/hour
+            subdials are NOT the current seconds, even when the central hand is stopped at 12.
+            For CLASSIC and GMT set secondsCenter equal to center.
+            A date window, a power-reserve arc with its own pointer, or a Spring Drive
+            movement does not change the layout. In particular, a Grand Seiko with central
+            seconds plus a power-reserve gauge is CLASSIC, not SMALL_SECONDS or REGULATOR.
+            Cardinal points lie on the main minute track: a date window replacing the numeral
             3 does not hide the 15-minute track position if its ticks remain visible.
-            This automatic geometry check supports CLASSIC central-seconds dials only.
-            For any other layout, hidden or ambiguous hands, unreadable seconds, or missing
-            cardinal landmarks set readable=false, choose the specific reason, and use
-            null for every time/coordinate field instead of guessing. Include all schema fields. If readable=true use reason=NONE.
+            Automatic geometry supports CLASSIC, GMT, SMALL_SECONDS and CHRONOGRAPH.
+            For REGULATOR, JUMP_HOUR, hidden or ambiguous hands, unreadable running seconds,
+            or missing cardinal landmarks set readable=false, choose the specific reason,
+            and use null for every time/coordinate field instead of guessing.
+            Include all schema fields. If readable=true use reason=NONE.
             Return only JSON. Do not invent confidence percentages.
         """.trimIndent()
         val parts = JSONArray().put(JSONObject().put("text", prompt)).put(
@@ -143,10 +152,11 @@ object CloudReader {
             .put("layout", enumeration("CLASSIC", "GMT", "SMALL_SECONDS", "CHRONOGRAPH", "REGULATOR", "JUMP_HOUR", "UNKNOWN"))
             .put("hour", integer(11)).put("minute", integer(59)).put("second", integer(59))
             .put("center", point(true)).put("hourTip", point(true)).put("minuteTip", point(true)).put("secondTip", point(true))
+            .put("secondsCenter", point(true))
             .put("markers", JSONObject().put("type", JSONArray(listOf("array", "null")))
                 .put("minItems", 4).put("maxItems", 4).put("items", point(false)))
         return JSONObject().put("type", "object").put("properties", properties).put("additionalProperties", false)
-            .put("required", JSONArray(listOf("readable", "reason", "layout", "hour", "minute", "second", "center", "hourTip", "minuteTip", "secondTip", "markers")))
+            .put("required", JSONArray(listOf("readable", "reason", "layout", "hour", "minute", "second", "center", "hourTip", "minuteTip", "secondTip", "secondsCenter", "markers")))
     }
 
     private fun discoverModels(apiKey: String): List<String> {
@@ -283,9 +293,10 @@ object CloudReader {
             field = "typ ciferníka"
             val layout = json.optString("layout")
             val reason = json.optString("reason")
-            val unsupported = layout in setOf("GMT", "SMALL_SECONDS", "CHRONOGRAPH", "REGULATOR", "JUMP_HOUR")
+            val unsupported = layout in setOf("REGULATOR", "JUMP_HOUR")
+            val supported = layout in setOf("CLASSIC", "GMT", "SMALL_SECONDS", "CHRONOGRAPH")
             if (unsupported || reason == "UNSUPPORTED_LAYOUT") {
-                CloudReadResult(null, "Gemini označilo ciferník ako nepodporovaný typ (${if (unsupported) layout else "neurčený"}). Automatická kontrola podporuje tri centrálne ručičky; typ overte ručne.")
+                CloudReadResult(null, "Gemini označilo ciferník ako nepodporovaný typ (${if (unsupported) layout else "neurčený"}). Typ overte ručne.")
             } else if (json.opt("readable") == false) {
                 CloudReadResult(null, when (reason) {
                     "SECONDS_NOT_VISIBLE" -> "Gemini nerozpoznalo sekundovú ručičku. Sekundy odčítajte ručne."
@@ -294,7 +305,7 @@ object CloudReader {
                     else -> "Gemini odmietlo automatické odčítanie bez konkrétneho dôvodu. Odčítajte čas ručne."
                 })
             } else {
-                require(layout == "CLASSIC")
+                require(supported)
                 field = "príznak čitateľnosti"
                 require(json.opt("readable") == true)
                 field = "dôvod odčítania"
@@ -321,11 +332,17 @@ object CloudReader {
                 val hourTip = namedPoint("hourTip", "koniec hodinovej ručičky")
                 val minuteTip = namedPoint("minuteTip", "koniec minútovej ručičky")
                 val secondTip = namedPoint("secondTip", "koniec sekundovej ručičky")
+                val secondsCenter = namedPoint("secondsCenter", "stred sekundového subciferníka")
                 field = "orientačné body ciferníka"
                 val markers = json.getJSONArray("markers")
                 require(markers.length() == 4)
-                val geometry = DialGeometry(center, hourTip, minuteTip, secondTip, (0..3).map { point(markers.getJSONArray(it)) })
-                if (geometry.matches(h, m, s)) CloudReadResult(CloudReading(h, m, s, geometry, model))
+                val parsedLayout = DialLayout.valueOf(layout)
+                val geometry = DialGeometry(
+                    center, hourTip, minuteTip, secondTip,
+                    secondCenter = secondsCenter.takeIf { parsedLayout == DialLayout.SMALL_SECONDS || parsedLayout == DialLayout.CHRONOGRAPH },
+                    markers = (0..3).map { point(markers.getJSONArray(it)) }
+                )
+                if (geometry.matches(h, m, s)) CloudReadResult(CloudReading(h, m, s, geometry, model, parsedLayout))
                 else CloudReadResult(null, "Návrh Gemini nesúhlasí s označenými ručičkami. Skontrolujte ciferník ručne.")
             }
         } catch (_: Exception) {
