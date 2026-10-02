@@ -11,6 +11,7 @@ class CloudReaderTest {
     private fun reply(): JSONObject = JSONObject().put("readable", true).put("reason", "NONE").put("layout", "CLASSIC")
         .put("hour", 5).put("minute", 18).put("second", 21).put("center", JSONArray(listOf(.5, .5)))
         .put("hourTip", point(159.175, .22)).put("minuteTip", point(110.1, .35)).put("secondTip", point(126.0, .38))
+        .put("secondsCenter", JSONArray(listOf(.5, .5)))
         .put("markers", JSONArray().put(point(0.0, .43)).put(point(90.0, .43)).put(point(180.0, .43)).put(point(270.0, .43)))
 
     @Test fun acceptsConsistentGeometryAndRetainsActualModel() {
@@ -36,6 +37,20 @@ class CloudReaderTest {
         assertNull(CloudReader.parse("{}", "test").reading)
         assertNull(CloudReader.parse("not JSON", "test").reading)
     }
+    @Test fun acceptsChronographRunningSecondsFromItsOwnSubdial() {
+        val secondsCenter = JSONArray(listOf(.30, .50))
+        val secondsAngle = 126.0 * PI / 180.0
+        val secondsTip = JSONArray(listOf(.30 + sin(secondsAngle) * .08, .50 - cos(secondsAngle) * .08))
+        val result = CloudReader.parse(reply()
+            .put("layout", "CHRONOGRAPH")
+            .put("secondsCenter", secondsCenter)
+            .put("secondTip", secondsTip)
+            .toString(), "test")
+        assertNotNull(result.reading)
+        assertEquals(DialLayout.CHRONOGRAPH, result.reading!!.layout)
+        assertNotNull(result.reading!!.geometry.secondCenter)
+    }
+
     @Test fun reportsRefusalReasonsWithoutCallingEveryFailureUnrecognisedHands() {
         fun error(reason: String) = CloudReader.parse(
             JSONObject().put("readable", false).put("layout", "CLASSIC").put("reason", reason).toString(), "test"
@@ -62,6 +77,7 @@ class CloudReaderTest {
         assertEquals(11, properties.getJSONObject("hour").getInt("maximum"))
         assertEquals(59, properties.getJSONObject("second").getInt("maximum"))
         assertEquals(2, properties.getJSONObject("center").getInt("minItems"))
+        assertEquals(2, properties.getJSONObject("secondsCenter").getInt("minItems"))
         assertEquals(4, properties.getJSONObject("markers").getInt("minItems"))
         val required = schema.getJSONArray("required")
         assertTrue((0 until required.length()).any { required.getString(it) == "center" })
@@ -102,7 +118,7 @@ class CloudReaderTest {
     }
     @Test fun acceptsExplicitAbstentionWithNullCoordinates() {
         val refusal = reply().put("readable", false).put("reason", "SECONDS_NOT_VISIBLE")
-        for (key in listOf("hour", "minute", "second", "center", "hourTip", "minuteTip", "secondTip", "markers")) refusal.put(key, JSONObject.NULL)
+        for (key in listOf("hour", "minute", "second", "center", "hourTip", "minuteTip", "secondTip", "secondsCenter", "markers")) refusal.put(key, JSONObject.NULL)
         val result = CloudReader.parseResponse(envelope(refusal.toString()), "test")
         assertNull(result.reading)
         assertTrue(result.error.orEmpty().contains("sekundovú"))
