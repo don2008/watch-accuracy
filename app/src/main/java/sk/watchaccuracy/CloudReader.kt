@@ -34,6 +34,7 @@ object CloudReader {
     private const val FALLBACK_MODEL = "gemini-3.5-flash-lite"
     private const val COMPATIBILITY_MODEL = "gemini-2.5-flash"
     private const val ENDPOINT_PREFIX = "https://generativelanguage.googleapis.com/v1beta/models/"
+    private const val MODEL_LIST_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000"
 
     fun readDetailed(path: String, apiKey: String): CloudReadResult {
         if (apiKey.isBlank()) return CloudReadResult(null)
@@ -55,15 +56,17 @@ object CloudReader {
             } finally { source.recycle() }
         }.getOrElse { return CloudReadResult(null, "Fotografiu sa nepodarilo pripraviť") }
         val key = apiKey.trim()
-        val attempts = listOf(
-            PRIMARY_MODEL to false,
-            PRIMARY_MODEL to true,
-            FALLBACK_MODEL to false,
-            COMPATIBILITY_MODEL to true
-        )
+        val discovered = discoverModels(key)
+        val models = if (discovered.isNotEmpty()) discovered.take(6) else
+            listOf(PRIMARY_MODEL, FALLBACK_MODEL, COMPATIBILITY_MODEL)
+        val attempts = models.distinct().flatMap { model ->
+            // First use the documented JSON schema mode. Some older models only
+            // accept JSON MIME type without a schema, so retain that safe fallback.
+            listOf(model to false, model to true)
+        }
         var last = CloudReadResult(null, "Gemini: požiadavku sa nepodarilo dokončiť.")
-        for ((model, legacySchema) in attempts) {
-            val result = request(model, bytes, key, legacySchema)
+        for ((model, schemaFree) in attempts) {
+            val result = request(model, bytes, key, schemaFree)
             last = result
             // A response without an HTTP error was processed by the model; do not
             // replace a meaningful refusal or geometry error with another attempt.
@@ -76,7 +79,7 @@ object CloudReader {
         return last
     }
 
-    internal fun requestBody(base64Image: String, legacySchema: Boolean = false): JSONObject {
+    internal fun requestBody(base64Image: String, schemaFree: Boolean = false): JSONObject {
         val prompt = """
             Inspect this analog watch photograph using only visible evidence. Locate the actual
             pivot where the hands meet, not the image centre or brand logo. Account for dial
@@ -112,17 +115,15 @@ object CloudReader {
             JSONObject().put("inline_data", JSONObject().put("mime_type", "image/jpeg")
                 .put("data", base64Image))
         )
-        val generationConfig = JSONObject().put("temperature", 0)
-        if (legacySchema) {
-            // Compatibility mode deliberately omits a schema. Different Gemini
-            // model generations accept different schema dialects/field names.
-            // The response is still required to be JSON and is strictly
-            // validated by parse() before any value reaches the UI.
-            generationConfig.put("responseMimeType", "application/json")
-        } else {
-            generationConfig.put("responseFormat", JSONObject().put("text", JSONObject()
-                .put("mimeType", "application/json").put("schema", responseSchema())))
+        val generationConfig = JSONObject()
+            .put("temperature", 0)
+            .put("responseMimeType", "application/json")
+        if (!schemaFree) {
+            // This is the documented generateContent JSON-mode dialect.
+            generationConfig.put("responseSchema", responseSchema())
         }
+        // In schema-free compatibility mode the model is still constrained to
+        // JSON MIME type and parse() strictly validates every returned field.
         return JSONObject()
             .put("contents", JSONArray().put(JSONObject().put("parts", parts)))
             .put("generationConfig", generationConfig)
@@ -148,8 +149,61 @@ object CloudReader {
             .put("required", JSONArray(listOf("readable", "reason", "layout", "hour", "minute", "second", "center", "hourTip", "minuteTip", "secondTip", "markers")))
     }
 
-    private fun request(model: String, imageBytes: ByteArray, apiKey: String, legacySchema: Boolean): CloudReadResult {
-        val body = requestBody(Base64.encodeToString(imageBytes, Base64.NO_WRAP), legacySchema)
+    private fun discoverModels(apiKey: String): List<String> {
+        var connection: HttpURLConnection? = null
+        return try {
+            connection = URL(MODEL_LIST_ENDPOINT).openConnection() as HttpURLConnection
+            connection.apply {
+                requestMethod = "GET"; connectTimeout = 12_000; readTimeout = 15_000
+                setRequestProperty("x-goog-api-key", apiKey)
+            }
+            if (connection.responseCode !in 200..299) emptyList()
+            else selectModels(JSONObject(connection.inputStream.bufferedReader().use { it.readText() }))
+        } catch (_: Exception) {
+            emptyList()
+        } finally {
+            connection?.disconnect()
+        }
+    }
+
+    internal fun selectModels(response: JSONObject): List<String> {
+        val models = response.optJSONArray("models") ?: return emptyList()
+        val candidates = mutableListOf<String>()
+        for (i in 0 until models.length()) {
+            val item = models.optJSONObject(i) ?: continue
+            val rawName = item.optString("name")
+            val name = rawName.removePrefix("models/")
+            if (!name.startsWith("gemini-", ignoreCase = true)) continue
+            val methods = item.optJSONArray("supportedGenerationMethods") ?: continue
+            val supportsGenerateContent = (0 until methods.length())
+                .any { methods.optString(it) == "generateContent" }
+            if (!supportsGenerateContent) continue
+            val lower = name.lowercase()
+            if (listOf("embedding", "-image", "imagen", "veo", "tts", "live", "audio",
+                    "robotics", "computer-use", "deep-research").any { it in lower }) continue
+            candidates += name
+        }
+        val preferred = listOf(
+            "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.5-flash",
+            "gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3-flash-preview",
+            "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash"
+        )
+        return candidates.distinct().sortedWith(
+            compareBy<String> {
+                val exact = preferred.indexOf(it)
+                when {
+                    exact >= 0 -> exact
+                    "flash" in it.lowercase() -> 100
+                    "pro" in it.lowercase() -> 200
+                    else -> 300
+                }
+            }.thenBy { if ("preview" in it.lowercase()) 1 else 0 }
+                .thenBy { it }
+        )
+    }
+
+    private fun request(model: String, imageBytes: ByteArray, apiKey: String, schemaFree: Boolean): CloudReadResult {
+        val body = requestBody(Base64.encodeToString(imageBytes, Base64.NO_WRAP), schemaFree)
         var connection: HttpURLConnection? = null
         return try {
             connection = URL(ENDPOINT_PREFIX + model + ":generateContent").openConnection() as HttpURLConnection
