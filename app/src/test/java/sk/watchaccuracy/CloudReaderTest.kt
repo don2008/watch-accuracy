@@ -30,8 +30,8 @@ class CloudReaderTest {
             assertNull(CloudReader.parse(reply().put("minute", value).toString(), "test").reading)
         }
     }
-    @Test fun rejectsDisagreementUnsupportedLayoutAndExplicitAbstention() {
-        assertNull(CloudReader.parse(reply().put("hour", 10).toString(), "test").reading)
+    @Test fun keepsEditablePointDisagreementButRejectsUnsupportedLayoutAndAbstention() {
+        assertNotNull(CloudReader.parse(reply().put("hour", 10).toString(), "test").reading)
         assertNull(CloudReader.parse(reply().put("layout", "REGULATOR").toString(), "test").reading)
         assertNull(CloudReader.parse(reply().put("readable", false).toString(), "test").reading)
         assertNull(CloudReader.parse("{}", "test").reading)
