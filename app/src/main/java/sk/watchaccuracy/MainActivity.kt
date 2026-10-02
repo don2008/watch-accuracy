@@ -556,7 +556,7 @@ private fun latestRate(t: UiText, w: Watch): String {
                     OutlinedButton(onClick = {
                         suggestionRevision++
                         selectedRead = cloudTime; cloudSelected = true; showPoints = true
-                        layout = DialLayout.CLASSIC
+                        layout = cloudTime.layout
                         h = cloudTime.hour.toString(); m = cloudTime.minute.toString(); sec = cloudTime.second.toString()
                     }) { Text(t.useCloudSuggestion) }
                     OutlinedButton(onClick = {
@@ -610,13 +610,13 @@ private fun latestRate(t: UiText, w: Watch): String {
     val projection = remember(read.geometry) { read.geometry?.projection() }
     fun normalized(p: Offset) = DialPoint(p.x / viewSize.width.toDouble(), p.y / viewSize.height.toDouble())
     fun angle(origin: Offset, point: Offset): Double {
-        val corrected = if (!usesSecondsSubdial) projection?.angle(normalized(origin), normalized(point)) else null
+        val corrected = projection?.angle(normalized(origin), normalized(point))
         return corrected ?: ((atan2((point.x - origin.x).toDouble(), (origin.y - point.y).toDouble()) * 180.0 / PI + 360.0) % 360.0)
     }
     fun updateTime(origin: Offset, secondsOrigin: Offset, points: List<Offset>) {
         if (points.size != 3) return
         val second = (angle(secondsOrigin, points[2]) / 6.0).roundToInt() % 60
-        val minute = if (projection != null && !usesSecondsSubdial)
+        val minute = if (projection != null)
             (((angle(origin, points[1]) - second * .1 + 360) % 360) / 6.0).roundToInt() % 60
         else (angle(origin, points[1]) / 6.0).roundToInt() % 60
         val hourAngle = angle(origin, points[0])
@@ -635,10 +635,13 @@ private fun latestRate(t: UiText, w: Watch): String {
             val radians = degrees * PI / 180.0
             return Offset((from.x + kotlin.math.sin(radians) * length).toFloat(), (from.y - kotlin.math.cos(radians) * length).toFloat())
         }
-        val subdialOrigin = if (usesSecondsSubdial) Offset(viewSize.width * .5f, viewSize.height * .72f) else origin
+        val cloudSecondsCenter = read.geometry?.secondCenter
+        val subdialOrigin = if (usesSecondsSubdial && cloudSecondsCenter != null)
+            Offset((cloudSecondsCenter.x * viewSize.width).toFloat(), (cloudSecondsCenter.y * viewSize.height).toFloat())
+        else if (usesSecondsSubdial) Offset(viewSize.width * .5f, viewSize.height * .72f) else origin
         center = origin
         secondsCenter = subdialOrigin
-        hands = if (read.geometry != null && !usesSecondsSubdial) {
+        hands = if (read.geometry != null) {
             listOf(read.geometry.hourTip, read.geometry.minuteTip, read.geometry.secondTip).map {
                 Offset((it.x * viewSize.width).toFloat(), (it.y * viewSize.height).toFloat())
             }
