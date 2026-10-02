@@ -19,26 +19,35 @@ data class DialGeometry(
 ) {
     fun projection(): DialProjection? = DialProjection.from(markers)
 
-    fun matches(hour: Int, minute: Int, second: Int): Boolean {
-        if (hour !in 0..11 || minute !in 0..59 || second !in 0..59) return false
+    /** Verifies only that the returned pivots and tips form usable hands on the dial. */
+    fun plausible(): Boolean {
         val secondsOrigin = secondCenter ?: center
         if (!(listOf(center, hourTip, minuteTip, secondsOrigin, secondTip) + markers).all { it.valid() }) return false
         val projection = projection() ?: return false
         val origin = projection.map(center) ?: return false
         val projectedSecondsOrigin = projection.map(secondsOrigin) ?: return false
-        if (hypot(origin.x, origin.y) > .15) return false
-        if (hypot(projectedSecondsOrigin.x, projectedSecondsOrigin.y) > .82) return false
+        if (hypot(origin.x, origin.y) > .18) return false
+        if (hypot(projectedSecondsOrigin.x, projectedSecondsOrigin.y) > .88) return false
 
         fun length(from: DialPoint, to: DialPoint): Double {
             val a = projection.map(from) ?: return -1.0
             val b = projection.map(to) ?: return -1.0
             return hypot(b.x - a.x, b.y - a.y)
         }
-        if (length(center, hourTip) !in .12..1.15 || length(center, minuteTip) !in .12..1.15) return false
-        // A subdial hand is intentionally much shorter than a central hand.
+        if (length(center, hourTip) !in .08..1.20 || length(center, minuteTip) !in .10..1.20) return false
         val secondLength = length(secondsOrigin, secondTip)
-        if (secondLength !in (if (secondCenter == null) .12..1.15 else .035..0.48)) return false
+        return secondLength in (if (secondCenter == null) .08..1.20 else .025..0.55)
+    }
 
+    /**
+     * Cross-checks numeric time against the points. This remains useful for tests
+     * and diagnostics, but cloud suggestions are not discarded solely because a
+     * vision model placed an editable point a few pixels away.
+     */
+    fun matches(hour: Int, minute: Int, second: Int): Boolean {
+        if (hour !in 0..11 || minute !in 0..59 || second !in 0..59 || !plausible()) return false
+        val projection = projection() ?: return false
+        val secondsOrigin = secondCenter ?: center
         fun difference(a: Double, b: Double) = abs((a - b + 540.0) % 360.0 - 180.0)
         val hourAngle = projection.angle(center, hourTip) ?: return false
         val minuteAngle = projection.angle(center, minuteTip) ?: return false
