@@ -12,10 +12,10 @@ data class DialGeometry(
     val hourTip: DialPoint,
     val minuteTip: DialPoint,
     val secondTip: DialPoint,
-    /** Running-seconds pivot. Null means the main hour/minute pivot. */
-    val secondCenter: DialPoint? = null,
     /** Minute-track positions at 12, 3, 6, 9, in this order. */
-    val markers: List<DialPoint>
+    val markers: List<DialPoint>,
+    /** Running-seconds pivot. Null means the main hour/minute pivot. */
+    val secondCenter: DialPoint? = null
 ) {
     fun projection(): DialProjection? = DialProjection.from(markers)
 
