@@ -528,12 +528,18 @@ private fun latestRate(t: UiText, w: Watch): String {
 }
 
 @Composable private fun ReviewScreen(t: UiText, s: Screen.Review, retake: () -> Unit, save: (Int, Int, Int, DialLayout) -> Unit) {
-    var h by remember { mutableStateOf(s.read.hour.takeIf { it >= 0 }?.toString().orEmpty()) }; var m by remember { mutableStateOf(s.read.minute.takeIf { it >= 0 }?.toString().orEmpty()) }; var sec by remember { mutableStateOf(s.read.second.takeIf { it >= 0 }?.toString().orEmpty()) }
-    var selectedRead by remember(s.path) { mutableStateOf(s.read) }
+    // A successful online reading is the best available initial suggestion.
+    // The local detector remains one tap away and is still used offline.
+    val initialCloud = remember(s.path, s.cloud) { s.cloud?.asReadTime(s.capturedAt) }
+    val initialRead = initialCloud ?: s.read
+    var h by remember(s.path) { mutableStateOf(initialRead.hour.takeIf { it >= 0 }?.toString().orEmpty()) }
+    var m by remember(s.path) { mutableStateOf(initialRead.minute.takeIf { it >= 0 }?.toString().orEmpty()) }
+    var sec by remember(s.path) { mutableStateOf(initialRead.second.takeIf { it >= 0 }?.toString().orEmpty()) }
+    var selectedRead by remember(s.path) { mutableStateOf(initialRead) }
     var suggestionRevision by remember(s.path) { mutableIntStateOf(0) }
-    var cloudSelected by remember(s.path) { mutableStateOf(false) }
+    var cloudSelected by remember(s.path) { mutableStateOf(initialCloud != null) }
     var showPoints by remember(s.path) { mutableStateOf(true) }
-    var layout by remember { mutableStateOf(s.read.layout) }; var layoutOpen by remember { mutableStateOf(false) }
+    var layout by remember(s.path) { mutableStateOf(initialRead.layout) }; var layoutOpen by remember { mutableStateOf(false) }
     fun layoutName(value: DialLayout) = when (value) { DialLayout.CLASSIC -> t.layoutClassic; DialLayout.GMT -> t.layoutGmt; DialLayout.SMALL_SECONDS -> t.layoutSmallSeconds; DialLayout.CHRONOGRAPH -> t.layoutChronograph; DialLayout.REGULATOR -> t.layoutRegulator; DialLayout.JUMP_HOUR -> t.layoutJumpHour }
     val validTime = h.toIntOrNull()?.let { it in 0..23 } == true &&
         m.toIntOrNull()?.let { it in 0..59 } == true && sec.toIntOrNull()?.let { it in 0..59 } == true
