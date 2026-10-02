@@ -32,6 +32,7 @@ data class CloudReadResult(val reading: CloudReading?, val error: String? = null
 object CloudReader {
     private const val PRIMARY_MODEL = "gemini-3.8-flash"
     private const val FALLBACK_MODEL = "gemini-3.5-flash-lite"
+    private const val COMPATIBILITY_MODEL = "gemini-2.5-flash"
     private const val ENDPOINT_PREFIX = "https://generativelanguage.googleapis.com/v1beta/models/"
 
     fun readDetailed(path: String, apiKey: String): CloudReadResult {
@@ -53,16 +54,29 @@ object CloudReader {
                 } finally { jpeg.recycle() }
             } finally { source.recycle() }
         }.getOrElse { return CloudReadResult(null, "Fotografiu sa nepodarilo pripraviť") }
-        val first = request(PRIMARY_MODEL, bytes, apiKey.trim())
-        if (first.httpCode != 503) return first
-        Thread.sleep(900)
-        val retry = request(PRIMARY_MODEL, bytes, apiKey.trim())
-        if (retry.httpCode != 503) return retry
-        // Preserve the actual fallback error (e.g. a quota error), not the first 503.
-        return request(FALLBACK_MODEL, bytes, apiKey.trim())
+        val key = apiKey.trim()
+        val attempts = listOf(
+            PRIMARY_MODEL to false,
+            PRIMARY_MODEL to true,
+            FALLBACK_MODEL to false,
+            COMPATIBILITY_MODEL to true
+        )
+        var last = CloudReadResult(null, "Gemini: požiadavku sa nepodarilo dokončiť.")
+        for ((model, legacySchema) in attempts) {
+            val result = request(model, bytes, key, legacySchema)
+            last = result
+            // A response without an HTTP error was processed by the model; do not
+            // replace a meaningful refusal or geometry error with another attempt.
+            if (result.httpCode == null) return result
+            if (result.httpCode in setOf(401, 403, 429)) return result
+            if (result.httpCode == 400 && result.error.orEmpty().contains("API kľúč je neplatný")) return result
+            if (result.httpCode !in setOf(400, 404, 503)) return result
+            if (result.httpCode == 503) Thread.sleep(900)
+        }
+        return last
     }
 
-    internal fun requestBody(base64Image: String): JSONObject {
+    internal fun requestBody(base64Image: String, legacySchema: Boolean = false): JSONObject {
         val prompt = """
             Inspect this analog watch photograph using only visible evidence. Locate the actual
             pivot where the hands meet, not the image centre or brand logo. Account for dial
@@ -98,11 +112,17 @@ object CloudReader {
             JSONObject().put("inline_data", JSONObject().put("mime_type", "image/jpeg")
                 .put("data", base64Image))
         )
+        val generationConfig = JSONObject().put("temperature", 0)
+        if (legacySchema) {
+            generationConfig.put("responseMimeType", "application/json")
+                .put("responseSchema", responseSchema())
+        } else {
+            generationConfig.put("responseFormat", JSONObject().put("text", JSONObject()
+                .put("mimeType", "application/json").put("schema", responseSchema())))
+        }
         return JSONObject()
             .put("contents", JSONArray().put(JSONObject().put("parts", parts)))
-            .put("generationConfig", JSONObject().put("temperature", 0)
-                .put("responseFormat", JSONObject().put("text", JSONObject()
-                    .put("mimeType", "application/json").put("schema", responseSchema()))))
+            .put("generationConfig", generationConfig)
     }
 
     internal fun responseSchema(): JSONObject {
@@ -125,8 +145,8 @@ object CloudReader {
             .put("required", JSONArray(listOf("readable", "reason", "layout", "hour", "minute", "second", "center", "hourTip", "minuteTip", "secondTip", "markers")))
     }
 
-    private fun request(model: String, imageBytes: ByteArray, apiKey: String): CloudReadResult {
-        val body = requestBody(Base64.encodeToString(imageBytes, Base64.NO_WRAP))
+    private fun request(model: String, imageBytes: ByteArray, apiKey: String, legacySchema: Boolean): CloudReadResult {
+        val body = requestBody(Base64.encodeToString(imageBytes, Base64.NO_WRAP), legacySchema)
         var connection: HttpURLConnection? = null
         return try {
             connection = URL(ENDPOINT_PREFIX + model + ":generateContent").openConnection() as HttpURLConnection
@@ -138,15 +158,10 @@ object CloudReader {
             connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
             val code = connection.responseCode
             if (code !in 200..299) {
-                // Do not echo arbitrary server messages or keys into the UI.
-                CloudReadResult(null, when (code) {
-                    400 -> "Gemini HTTP 400: služba odmietla požiadavku; môže ísť o jej formát alebo API kľúč."
-                    401, 403 -> "Gemini HTTP $code: skontrolujte API kľúč a oprávnenia projektu."
-                    404 -> "Gemini HTTP 404: model nie je pre tento projekt dostupný."
-                    429 -> "Gemini HTTP 429: prekročený limit požiadaviek alebo kvóta."
-                    503 -> "Gemini HTTP 503: služba je dočasne preťažená."
-                    else -> "Gemini HTTP $code"
-                }, code)
+                val errorBody = runCatching {
+                    connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                }.getOrDefault("")
+                httpError(code, errorBody)
             } else {
                 val response = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
                 parseResponse(response, model)
@@ -158,6 +173,31 @@ object CloudReader {
         } catch (_: Exception) {
             CloudReadResult(null, "Gemini: odpoveď sa nepodarilo spracovať.")
         } finally { connection?.disconnect() }
+    }
+
+    private fun httpError(code: Int, body: String): CloudReadResult {
+        val error = runCatching { JSONObject(body).optJSONObject("error") }.getOrNull()
+        val status = error?.optString("status").orEmpty()
+        val message = error?.optString("message").orEmpty().lowercase()
+        // Never display the raw server body: it may contain project details.
+        val text = when {
+            code == 400 && "api key" in message && ("invalid" in message || "not valid" in message) ->
+                "Gemini HTTP 400: API kľúč je neplatný. Skontrolujte ho v nastaveniach."
+            code == 400 && status == "INVALID_ARGUMENT" ->
+                "Gemini HTTP 400: model odmietol formát požiadavky; skúša sa kompatibilný režim."
+            code == 400 ->
+                "Gemini HTTP 400: služba odmietla požiadavku."
+            code == 401 || code == 403 ->
+                "Gemini HTTP $code: skontrolujte API kľúč a oprávnenia projektu."
+            code == 404 ->
+                "Gemini HTTP 404: model nie je pre tento projekt dostupný."
+            code == 429 ->
+                "Gemini HTTP 429: prekročený limit požiadaviek alebo kvóta."
+            code == 503 ->
+                "Gemini HTTP 503: služba je dočasne preťažená."
+            else -> "Gemini HTTP $code"
+        }
+        return CloudReadResult(null, text, code)
     }
 
     internal fun parseResponse(response: JSONObject, model: String): CloudReadResult {
