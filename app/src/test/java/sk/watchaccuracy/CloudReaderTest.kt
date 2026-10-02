@@ -66,6 +66,10 @@ class CloudReaderTest {
         val required = schema.getJSONArray("required")
         assertTrue((0 until required.length()).any { required.getString(it) == "center" })
         assertFalse(schema.getBoolean("additionalProperties"))
+        val legacyConfig = CloudReader.requestBody("test-image", true).getJSONObject("generationConfig")
+        assertEquals("application/json", legacyConfig.getString("responseMimeType"))
+        assertTrue(legacyConfig.has("responseJsonSchema"))
+        assertFalse(legacyConfig.has("responseSchema"))
     }
     @Test fun handlesFullApiEnvelopeAndDoesNotReadThinkingAsOutput() {
         val result = CloudReader.parseResponse(envelope(reply().toString()), "test")
