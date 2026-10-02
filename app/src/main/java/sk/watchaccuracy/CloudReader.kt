@@ -115,7 +115,7 @@ object CloudReader {
         val generationConfig = JSONObject().put("temperature", 0)
         if (legacySchema) {
             generationConfig.put("responseMimeType", "application/json")
-                .put("responseSchema", responseSchema())
+                .put("responseJsonSchema", responseSchema())
         } else {
             generationConfig.put("responseFormat", JSONObject().put("text", JSONObject()
                 .put("mimeType", "application/json").put("schema", responseSchema())))
@@ -184,7 +184,7 @@ object CloudReader {
             code == 400 && "api key" in message && ("invalid" in message || "not valid" in message) ->
                 "Gemini HTTP 400: API kľúč je neplatný. Skontrolujte ho v nastaveniach."
             code == 400 && status == "INVALID_ARGUMENT" ->
-                "Gemini HTTP 400: model odmietol formát požiadavky; skúša sa kompatibilný režim."
+                "Gemini HTTP 400: model odmietol formát požiadavky."
             code == 400 ->
                 "Gemini HTTP 400: služba odmietla požiadavku."
             code == 401 || code == 403 ->
