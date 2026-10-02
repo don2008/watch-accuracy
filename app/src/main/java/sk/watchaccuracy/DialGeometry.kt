@@ -12,6 +12,8 @@ data class DialGeometry(
     val hourTip: DialPoint,
     val minuteTip: DialPoint,
     val secondTip: DialPoint,
+    /** Running-seconds pivot. Null means the main hour/minute pivot. */
+    val secondCenter: DialPoint? = null,
     /** Minute-track positions at 12, 3, 6, 9, in this order. */
     val markers: List<DialPoint>
 ) {
@@ -19,20 +21,31 @@ data class DialGeometry(
 
     fun matches(hour: Int, minute: Int, second: Int): Boolean {
         if (hour !in 0..11 || minute !in 0..59 || second !in 0..59) return false
-        if (!(listOf(center, hourTip, minuteTip, secondTip) + markers).all { it.valid() }) return false
+        val secondsOrigin = secondCenter ?: center
+        if (!(listOf(center, hourTip, minuteTip, secondsOrigin, secondTip) + markers).all { it.valid() }) return false
         val projection = projection() ?: return false
         val origin = projection.map(center) ?: return false
+        val projectedSecondsOrigin = projection.map(secondsOrigin) ?: return false
         if (hypot(origin.x, origin.y) > .15) return false
-        val tips = listOf(hourTip, minuteTip, secondTip)
-        if (tips.any { tip ->
-                val p = projection.map(tip)
-                p == null || hypot(p.x - origin.x, p.y - origin.y) !in .12..1.15
-            }) return false
+        if (hypot(projectedSecondsOrigin.x, projectedSecondsOrigin.y) > .82) return false
+
+        fun length(from: DialPoint, to: DialPoint): Double {
+            val a = projection.map(from) ?: return -1.0
+            val b = projection.map(to) ?: return -1.0
+            return hypot(b.x - a.x, b.y - a.y)
+        }
+        if (length(center, hourTip) !in .12..1.15 || length(center, minuteTip) !in .12..1.15) return false
+        // A subdial hand is intentionally much shorter than a central hand.
+        val secondLength = length(secondsOrigin, secondTip)
+        if (secondLength !in (if (secondCenter == null) .12..1.15 else .035..0.48)) return false
+
         fun difference(a: Double, b: Double) = abs((a - b + 540.0) % 360.0 - 180.0)
-        val angles = tips.map { projection.angle(center, it) ?: return false }
-        return difference(angles[0], hour * 30.0 + minute * .5 + second / 120.0) <= 8.0 &&
-            difference(angles[1], minute * 6.0 + second * .1) <= 5.0 &&
-            difference(angles[2], second * 6.0) <= 6.0
+        val hourAngle = projection.angle(center, hourTip) ?: return false
+        val minuteAngle = projection.angle(center, minuteTip) ?: return false
+        val secondAngle = projection.angle(secondsOrigin, secondTip) ?: return false
+        return difference(hourAngle, hour * 30.0 + minute * .5 + second / 120.0) <= 8.0 &&
+            difference(minuteAngle, minute * 6.0 + second * .1) <= 5.0 &&
+            difference(secondAngle, second * 6.0) <= 7.0
     }
 }
 
