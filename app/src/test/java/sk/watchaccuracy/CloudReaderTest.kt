@@ -59,7 +59,7 @@ class CloudReaderTest {
         assertTrue(error("LANDMARKS_NOT_VISIBLE").contains("orientačné body"))
         assertTrue(error("AMBIGUOUS_HANDS").contains("protizávažia"))
         assertTrue(error("unknown").contains("bez konkrétneho dôvodu"))
-        val layoutError = CloudReader.parse(reply().put("layout", "SMALL_SECONDS").toString(), "test")
+        val layoutError = CloudReader.parse(reply().put("layout", "REGULATOR").toString(), "test")
         assertTrue(layoutError.error.orEmpty().contains("nepodporovaný typ"))
     }
 
