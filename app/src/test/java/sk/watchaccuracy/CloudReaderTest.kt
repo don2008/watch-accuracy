@@ -152,4 +152,16 @@ class CloudReaderTest {
         assertTrue(result.error.orEmpty().contains("sekundovú"))
     }
 
+    @Test fun usesLowLatencyThinkingForCurrentGeminiModels() {
+        val gemini3 = CloudReader.thinkingConfigFor("gemini-3.8-flash")!!
+        assertEquals("low", gemini3.getString("thinkingLevel"))
+        assertFalse(gemini3.has("thinkingBudget"))
+
+        val gemini25 = CloudReader.thinkingConfigFor("gemini-2.5-flash")!!
+        assertEquals(0, gemini25.getInt("thinkingBudget"))
+        assertFalse(gemini25.has("thinkingLevel"))
+
+        assertNull(CloudReader.thinkingConfigFor("gemini-2.0-flash"))
+    }
+
 }
