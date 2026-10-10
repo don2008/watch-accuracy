@@ -22,8 +22,14 @@ data class CloudReading(
         val reference = Calendar.getInstance().apply { timeInMillis = referenceMillis }
         val secondsOfDay = reference.get(Calendar.HOUR_OF_DAY) * 3600 + reference.get(Calendar.MINUTE) * 60 + reference.get(Calendar.SECOND)
         val selectedGeometry = geometry ?: fallback?.geometry
+        // When Gemini supplies usable points, make the displayed numbers agree
+        // with those points instead of trusting an inconsistent numeric guess.
+        val geometricTime = geometry?.readTime()
+        val dialHour = geometricTime?.first ?: hour
+        val dialMinute = geometricTime?.second ?: minute
+        val dialSecond = geometricTime?.third ?: second
         return ReadTime(
-            nearestDialHour(hour, minute, second, secondsOfDay), minute, second,
+            nearestDialHour(dialHour, dialMinute, dialSecond, secondsOfDay), dialMinute, dialSecond,
             layout = layout, layoutConfidence = 1f,
             centerX = selectedGeometry?.center?.x?.toFloat() ?: fallback?.centerX ?: .5f,
             centerY = selectedGeometry?.center?.y?.toFloat() ?: fallback?.centerY ?: .5f,
