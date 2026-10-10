@@ -164,4 +164,15 @@ class CloudReaderTest {
         assertNull(CloudReader.thinkingConfigFor("gemini-2.0-flash"))
     }
 
+    @Test fun correctsNumericHourFromConsistentCloudGeometry() {
+        val cloud = CloudReader.parse(
+            reply().put("hour", 6).put("minute", 40).put("second", 50).toString(),
+            "test"
+        ).reading!!
+        val corrected = cloud.asReadTime(0L)
+        assertEquals(5, corrected.hour % 12)
+        assertEquals(18, corrected.minute)
+        assertEquals(21, corrected.second)
+    }
+
 }
