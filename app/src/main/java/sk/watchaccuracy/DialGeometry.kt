@@ -40,6 +40,26 @@ data class DialGeometry(
     }
 
     /**
+     * Reads the dial directly from the editable geometry. Subtracting the
+     * minute/second progression from the hour angle prevents 13:50 from being
+     * mistaken for 14:50 merely because the hour hand is already near two.
+     */
+    fun readTime(): Triple<Int, Int, Int>? {
+        if (!plausible()) return null
+        val projection = projection() ?: return null
+        val secondsOrigin = secondCenter ?: center
+        val hourAngle = projection.angle(center, hourTip) ?: return null
+        val minuteAngle = projection.angle(center, minuteTip) ?: return null
+        val secondAngle = projection.angle(secondsOrigin, secondTip) ?: return null
+        fun wrap(angle: Double) = (angle % 360.0 + 360.0) % 360.0
+
+        val second = (secondAngle / 6.0).roundToInt().mod(60)
+        val minute = (wrap(minuteAngle - second * .1) / 6.0).roundToInt().mod(60)
+        val hour = (wrap(hourAngle - minute * .5 - second / 120.0) / 30.0).roundToInt().mod(12)
+        return Triple(hour, minute, second)
+    }
+
+    /**
      * Cross-checks numeric time against the points. This remains useful for tests
      * and diagnostics, but cloud suggestions are not discarded solely because a
      * vision model placed an editable point a few pixels away.
