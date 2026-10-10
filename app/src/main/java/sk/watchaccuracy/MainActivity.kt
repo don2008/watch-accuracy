@@ -530,7 +530,7 @@ private fun latestRate(t: UiText, w: Watch): String {
 @Composable private fun ReviewScreen(t: UiText, s: Screen.Review, retake: () -> Unit, save: (Int, Int, Int, DialLayout) -> Unit) {
     // A successful online reading is the best available initial suggestion.
     // The local detector remains one tap away and is still used offline.
-    val initialCloud = remember(s.path, s.cloud) { s.cloud?.asReadTime(s.capturedAt) }
+    val initialCloud = remember(s.path, s.cloud) { s.cloud?.asReadTime(s.capturedAt, s.read) }
     val initialRead = initialCloud ?: s.read
     var h by remember(s.path) { mutableStateOf(initialRead.hour.takeIf { it >= 0 }?.toString().orEmpty()) }
     var m by remember(s.path) { mutableStateOf(initialRead.minute.takeIf { it >= 0 }?.toString().orEmpty()) }
@@ -551,7 +551,7 @@ private fun latestRate(t: UiText, w: Watch): String {
                     if (!showPoints) t.manualTimeHint else if (cloudSelected) t.cloudHandSuggestion else if (!selectedRead.centerDetected) t.uncertainCenterHint else t.aiHandSuggestion, showPoints)
             }
             s.cloud?.let { cloud ->
-                val cloudTime = cloud.asReadTime(s.capturedAt)
+                val cloudTime = cloud.asReadTime(s.capturedAt, s.read)
                 Text(
                     t.cloudAi + " (" + cloud.model + "): " + String.format(Locale.getDefault(), "%02d:%02d:%02d", cloudTime.hour, cloudTime.minute, cloudTime.second),
                     style = MaterialTheme.typography.bodySmall,
