@@ -530,7 +530,9 @@ private fun latestRate(t: UiText, w: Watch): String {
 @Composable private fun ReviewScreen(t: UiText, s: Screen.Review, retake: () -> Unit, save: (Int, Int, Int, DialLayout) -> Unit) {
     // A successful online reading is the best available initial suggestion.
     // The local detector remains one tap away and is still used offline.
-    val initialCloud = remember(s.path, s.cloud) { s.cloud?.asReadTime(s.capturedAt, s.read) }
+    val initialCloud = remember(s.path, s.cloud) {
+        s.cloud?.takeUnless { "lite" in it.model.lowercase() }?.asReadTime(s.capturedAt, s.read)
+    }
     val initialRead = initialCloud ?: s.read
     var h by remember(s.path) { mutableStateOf(initialRead.hour.takeIf { it >= 0 }?.toString().orEmpty()) }
     var m by remember(s.path) { mutableStateOf(initialRead.minute.takeIf { it >= 0 }?.toString().orEmpty()) }
