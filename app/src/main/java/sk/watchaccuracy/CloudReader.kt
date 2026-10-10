@@ -104,6 +104,14 @@ object CloudReader {
             from the pivot; do not mistake their counterweights, reflections, indices or a
             power-reserve indicator (common on Grand Seiko Spring Drive) for a time hand.
             A thin seconds hand can extend in both directions: report the reading tip.
+            The hourTip and minuteTip must be the physical ends of visible hands inside
+            the main dial, not extrapolated intersections with the minute track, bezel,
+            numerals, indices, reflections or empty space. Before returning, verify that
+            each line from its pivot to its tip overlaps the same visible hand for most
+            of its length. If it does not, correct the point or set readable=false with
+            reason=AMBIGUOUS_HANDS. On Tudor/Rolex-style dials, a snowflake, Mercedes,
+            arrow or lume-filled shape near the centre belongs to its hand; trace its
+            connected shaft to distinguish it from an hour marker.
             Never use a typical advertising time, filename, phone time or upload time.
             Independently read the time and locate the image points. All coordinates are
             normalized [x,y], x from left to right and y from top to bottom, in [0,1].
@@ -190,8 +198,13 @@ object CloudReader {
         val distinct = models.distinct()
         val first = distinct.firstOrNull() ?: PRIMARY_MODEL
         val remainder = distinct.filterNot { it == first }
-        val fallback = remainder.firstOrNull { "flash-lite" in it.lowercase() }
-            ?: remainder.firstOrNull { it == COMPATIBILITY_MODEL }
+        // Full Flash models are markedly more reliable for tracing overlapping hands.
+        // Lite remains a last resort, never the preferred timeout fallback.
+        val fallback = remainder.firstOrNull { it == COMPATIBILITY_MODEL }
+            ?: remainder.firstOrNull {
+                "flash" in it.lowercase() && "lite" !in it.lowercase()
+            }
+            ?: remainder.firstOrNull { "flash-lite" in it.lowercase() }
             ?: remainder.firstOrNull()
         return listOfNotNull(first, fallback).distinct()
     }
