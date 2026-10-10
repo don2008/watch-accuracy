@@ -48,7 +48,7 @@ class CloudReaderTest {
             .toString(), "test")
         assertNotNull(result.reading)
         assertEquals(DialLayout.CHRONOGRAPH, result.reading!!.layout)
-        assertNotNull(result.reading!!.geometry.secondCenter)
+        assertNotNull(result.reading!!.geometry?.secondCenter)
     }
 
     @Test fun reportsRefusalReasonsWithoutCallingEveryFailureUnrecognisedHands() {
@@ -126,7 +126,10 @@ class CloudReaderTest {
         assertTrue(CloudReader.parseResponse(JSONObject(), "test").error.orEmpty().contains("žiadny návrh"))
         assertTrue(CloudReader.parseResponse(envelope(""), "test").error.orEmpty().contains("prázdny"))
         val incomplete = reply().apply { remove("center") }
-        assertTrue(CloudReader.parse(incomplete.toString(), "test").error.orEmpty().contains("stred osi"))
+        val timeOnly = CloudReader.parse(incomplete.toString(), "test")
+        assertNotNull(timeOnly.reading)
+        assertNull(timeOnly.reading!!.geometry)
+        assertEquals(18, timeOnly.reading!!.minute)
         assertTrue(CloudReader.parse(reply().put("hour", 17).toString(), "test").error.orEmpty().contains("hodiny"))
     }
     @Test fun acceptsExplicitAbstentionWithNullCoordinates() {
