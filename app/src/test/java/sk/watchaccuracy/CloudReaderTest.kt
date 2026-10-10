@@ -104,9 +104,15 @@ class CloudReaderTest {
     }
     @Test fun limitsSlowNetworkAttemptsAndPrefersALighterFallback() {
         assertEquals(
-            listOf("gemini-3.8-flash", "gemini-3.5-flash-lite"),
+            listOf("gemini-3.8-flash", "gemini-2.5-flash"),
             CloudReader.selectAttemptModels(
                 listOf("gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash")
+            )
+        )
+        assertEquals(
+            listOf("gemini-3.8-flash", "gemini-3.7-flash"),
+            CloudReader.selectAttemptModels(
+                listOf("gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.5-flash-lite")
             )
         )
         assertEquals(
