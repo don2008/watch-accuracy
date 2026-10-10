@@ -102,6 +102,19 @@ class CloudReaderTest {
         val selected = CloudReader.selectModels(response)
         assertEquals(listOf("gemini-custom-flash", "gemini-custom-pro"), selected)
     }
+    @Test fun limitsSlowNetworkAttemptsAndPrefersALighterFallback() {
+        assertEquals(
+            listOf("gemini-3.8-flash", "gemini-3.5-flash-lite"),
+            CloudReader.selectAttemptModels(
+                listOf("gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash")
+            )
+        )
+        assertEquals(
+            listOf("gemini-2.5-flash", "gemini-2.0-flash"),
+            CloudReader.selectAttemptModels(listOf("gemini-2.5-flash", "gemini-2.0-flash"))
+        )
+    }
+
     @Test fun handlesFullApiEnvelopeAndDoesNotReadThinkingAsOutput() {
         val result = CloudReader.parseResponse(envelope(reply().toString()), "test")
         assertNotNull(result.reading)
