@@ -39,9 +39,9 @@ object CloudReader {
     private const val COMPATIBILITY_MODEL = "gemini-2.5-flash"
     private const val ENDPOINT_PREFIX = "https://generativelanguage.googleapis.com/v1beta/models/"
     private const val MODEL_LIST_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000"
-    private const val FIRST_READ_TIMEOUT_MS = 45_000
-    private const val RETRY_READ_TIMEOUT_MS = 30_000
-    private const val LAST_READ_TIMEOUT_MS = 25_000
+    private const val FIRST_READ_TIMEOUT_MS = 30_000
+    private const val RETRY_READ_TIMEOUT_MS = 20_000
+    private const val LAST_READ_TIMEOUT_MS = 15_000
     private const val TIMEOUT_CODE = 408
     private const val CONNECTION_ERROR_CODE = 599
     private data class ModelCache(val keyHash: Int, val keyLength: Int, val models: List<String>)
@@ -273,6 +273,17 @@ object CloudReader {
         )
     }
 
+    internal fun thinkingConfigFor(model: String): JSONObject? {
+        val lower = model.lowercase()
+        return when {
+            lower.startsWith("gemini-3") ->
+                JSONObject().put("thinkingLevel", "low")
+            lower.startsWith("gemini-2.5") ->
+                JSONObject().put("thinkingBudget", 0)
+            else -> null
+        }
+    }
+
     private fun request(
         model: String,
         imageBytes: ByteArray,
@@ -280,7 +291,11 @@ object CloudReader {
         schemaFree: Boolean,
         readTimeoutMs: Int
     ): CloudReadResult {
-        val body = requestBody(Base64.encodeToString(imageBytes, Base64.NO_WRAP), schemaFree)
+        val body = requestBody(Base64.encodeToString(imageBytes, Base64.NO_WRAP), schemaFree).also { request ->
+            thinkingConfigFor(model)?.let { config ->
+                request.getJSONObject("generationConfig").put("thinkingConfig", config)
+            }
+        }
         var connection: HttpURLConnection? = null
         return try {
             connection = URL(ENDPOINT_PREFIX + model + ":generateContent").openConnection() as HttpURLConnection
