@@ -41,6 +41,7 @@ object CloudReader {
     private const val MODEL_LIST_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000"
     private const val FIRST_READ_TIMEOUT_MS = 45_000
     private const val RETRY_READ_TIMEOUT_MS = 30_000
+    private const val LAST_READ_TIMEOUT_MS = 25_000
     private const val TIMEOUT_CODE = 408
     private const val CONNECTION_ERROR_CODE = 599
     private data class ModelCache(val keyHash: Int, val keyLength: Int, val models: List<String>)
@@ -72,7 +73,11 @@ object CloudReader {
         val attempts = selectAttemptModels(models)
         var last = CloudReadResult(null, "Gemini: požiadavku sa nepodarilo dokončiť.")
         for ((index, model) in attempts.withIndex()) {
-            val timeout = if (index == 0) FIRST_READ_TIMEOUT_MS else RETRY_READ_TIMEOUT_MS
+            val timeout = when (index) {
+                0 -> FIRST_READ_TIMEOUT_MS
+                1 -> RETRY_READ_TIMEOUT_MS
+                else -> LAST_READ_TIMEOUT_MS
+            }
             var result = request(model, bytes, key, schemaFree = false, readTimeoutMs = timeout)
             last = result
             // A response without an HTTP error was processed by the model; keep a
@@ -200,13 +205,19 @@ object CloudReader {
         val remainder = distinct.filterNot { it == first }
         // Full Flash models are markedly more reliable for tracing overlapping hands.
         // Lite remains a last resort, never the preferred timeout fallback.
-        val fallback = remainder.firstOrNull { it == COMPATIBILITY_MODEL }
-            ?: remainder.firstOrNull {
-                "flash" in it.lowercase() && "lite" !in it.lowercase()
-            }
-            ?: remainder.firstOrNull { "flash-lite" in it.lowercase() }
-            ?: remainder.firstOrNull()
-        return listOfNotNull(first, fallback).distinct()
+        val compatibility = remainder.firstOrNull { it == COMPATIBILITY_MODEL }
+        val fullFallback = remainder.firstOrNull {
+            it != compatibility && "flash" in it.lowercase() && "lite" !in it.lowercase()
+        }
+        val liteFallback = remainder.firstOrNull {
+            it != compatibility && it != fullFallback && "flash-lite" in it.lowercase()
+        }
+        // A 404 is immediate, so retaining a third advertised model does not add
+        // noticeable delay in the common failure case. The UI still never
+        // auto-applies a Lite result.
+        return listOfNotNull(first, compatibility, fullFallback, liteFallback)
+            .distinct()
+            .take(3)
     }
 
     private fun discoverModels(apiKey: String): List<String> {
