@@ -12,20 +12,22 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Calendar
 
-/** A separate, unconfirmed suggestion. Geometry must agree before it can be applied. */
+/** Online time suggestion. Invalid/missing geometry may fall back to the local detector. */
 data class CloudReading(
     val hour: Int, val minute: Int, val second: Int,
-    val geometry: DialGeometry, val model: String,
+    val geometry: DialGeometry?, val model: String,
     val layout: DialLayout = DialLayout.CLASSIC
 ) {
-    fun asReadTime(referenceMillis: Long): ReadTime {
+    fun asReadTime(referenceMillis: Long, fallback: ReadTime? = null): ReadTime {
         val reference = Calendar.getInstance().apply { timeInMillis = referenceMillis }
         val secondsOfDay = reference.get(Calendar.HOUR_OF_DAY) * 3600 + reference.get(Calendar.MINUTE) * 60 + reference.get(Calendar.SECOND)
+        val selectedGeometry = geometry ?: fallback?.geometry
         return ReadTime(
             nearestDialHour(hour, minute, second, secondsOfDay), minute, second,
             layout = layout, layoutConfidence = 1f,
-            centerX = geometry.center.x.toFloat(), centerY = geometry.center.y.toFloat(),
-            geometry = geometry
+            centerX = selectedGeometry?.center?.x?.toFloat() ?: fallback?.centerX ?: .5f,
+            centerY = selectedGeometry?.center?.y?.toFloat() ?: fallback?.centerY ?: .5f,
+            geometry = selectedGeometry
         )
     }
 }
@@ -365,26 +367,30 @@ object CloudReader {
                     return DialPoint(x.toDouble(), y.toDouble()).also { require(it.valid()) }
                 }
                 val h = integer("hour", 0..11); val m = integer("minute", 0..59); val s = integer("second", 0..59)
-                fun namedPoint(key: String, label: String): DialPoint {
-                    field = label
-                    return point(json.getJSONArray(key))
-                }
-                val center = namedPoint("center", "stred osi")
-                val hourTip = namedPoint("hourTip", "koniec hodinovej ručičky")
-                val minuteTip = namedPoint("minuteTip", "koniec minútovej ručičky")
-                val secondTip = namedPoint("secondTip", "koniec sekundovej ručičky")
-                val secondsCenter = namedPoint("secondsCenter", "stred sekundového subciferníka")
-                field = "orientačné body ciferníka"
-                val markers = json.getJSONArray("markers")
-                require(markers.length() == 4)
                 val parsedLayout = DialLayout.valueOf(layout)
-                val geometry = DialGeometry(
-                    center, hourTip, minuteTip, secondTip,
-                    secondCenter = secondsCenter.takeIf { parsedLayout == DialLayout.SMALL_SECONDS || parsedLayout == DialLayout.CHRONOGRAPH },
-                    markers = (0..3).map { point(markers.getJSONArray(it)) }
-                )
-                if (geometry.plausible()) CloudReadResult(CloudReading(h, m, s, geometry, model, parsedLayout))
-                else CloudReadResult(null, "Gemini neposlalo použiteľné umiestnenie ručičiek. Skontrolujte ciferník ručne.")
+
+                // Geometry is useful for editable points, but it must not invalidate a
+                // valid time reading. Gemini occasionally omits one coordinate even
+                // though hour/minute/second are present. In that case ReviewScreen
+                // combines the cloud time with the local detector's editable points.
+                val geometry = runCatching {
+                    fun namedPoint(key: String): DialPoint = point(json.getJSONArray(key))
+                    val center = namedPoint("center")
+                    val hourTip = namedPoint("hourTip")
+                    val minuteTip = namedPoint("minuteTip")
+                    val secondTip = namedPoint("secondTip")
+                    val secondsCenter = namedPoint("secondsCenter")
+                    val markers = json.getJSONArray("markers")
+                    require(markers.length() == 4)
+                    DialGeometry(
+                        center, hourTip, minuteTip, secondTip,
+                        secondCenter = secondsCenter.takeIf {
+                            parsedLayout == DialLayout.SMALL_SECONDS || parsedLayout == DialLayout.CHRONOGRAPH
+                        },
+                        markers = (0..3).map { point(markers.getJSONArray(it)) }
+                    ).takeIf { it.plausible() }
+                }.getOrNull()
+                CloudReadResult(CloudReading(h, m, s, geometry, model, parsedLayout))
             }
         } catch (_: Exception) {
             // 'field' is always our fixed label, never model content or exception text.
