@@ -37,13 +37,21 @@ object CloudReader {
     private const val COMPATIBILITY_MODEL = "gemini-2.5-flash"
     private const val ENDPOINT_PREFIX = "https://generativelanguage.googleapis.com/v1beta/models/"
     private const val MODEL_LIST_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000"
+    private const val FIRST_READ_TIMEOUT_MS = 45_000
+    private const val RETRY_READ_TIMEOUT_MS = 30_000
+    private const val TIMEOUT_CODE = 408
+    private const val CONNECTION_ERROR_CODE = 599
+    private data class ModelCache(val keyHash: Int, val keyLength: Int, val models: List<String>)
+    @Volatile private var modelCache: ModelCache? = null
 
     fun readDetailed(path: String, apiKey: String): CloudReadResult {
         if (apiKey.isBlank()) return CloudReadResult(null)
         val bytes = runCatching {
             val source = requireNotNull(BitmapFactory.decodeFile(path))
             try {
-                val scale = minOf(1.0, 1600.0 / maxOf(source.width, source.height))
+                // A 1200 px dial still preserves hand geometry while making the upload
+                // substantially faster and more reliable on a mobile connection.
+                val scale = minOf(1.0, 1200.0 / maxOf(source.width, source.height))
                 val jpeg = Bitmap.createBitmap((source.width * scale).toInt().coerceAtLeast(1), (source.height * scale).toInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888)
                 try {
                     Canvas(jpeg).apply {
@@ -51,34 +59,39 @@ object CloudReader {
                         drawBitmap(source, null, android.graphics.Rect(0, 0, jpeg.width, jpeg.height), android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG))
                     }
                     ByteArrayOutputStream().use { out ->
-                        check(jpeg.compress(Bitmap.CompressFormat.JPEG, 94, out))
+                        check(jpeg.compress(Bitmap.CompressFormat.JPEG, 88, out))
                         out.toByteArray()
                     }
                 } finally { jpeg.recycle() }
             } finally { source.recycle() }
         }.getOrElse { return CloudReadResult(null, "Fotografiu sa nepodarilo pripraviť") }
         val key = apiKey.trim()
-        val discovered = discoverModels(key)
-        val models = if (discovered.isNotEmpty()) discovered.take(6) else
-            listOf(PRIMARY_MODEL, FALLBACK_MODEL, COMPATIBILITY_MODEL)
-        val attempts = models.distinct().flatMap { model ->
-            // First use the documented JSON schema mode. Some older models only
-            // accept JSON MIME type without a schema, so retain that safe fallback.
-            listOf(model to false, model to true)
-        }
+        val models = availableModels(key)
+        val attempts = selectAttemptModels(models)
         var last = CloudReadResult(null, "Gemini: požiadavku sa nepodarilo dokončiť.")
-        for ((model, schemaFree) in attempts) {
-            val result = request(model, bytes, key, schemaFree)
+        for ((index, model) in attempts.withIndex()) {
+            val timeout = if (index == 0) FIRST_READ_TIMEOUT_MS else RETRY_READ_TIMEOUT_MS
+            var result = request(model, bytes, key, schemaFree = false, readTimeoutMs = timeout)
             last = result
-            // A response without an HTTP error was processed by the model; do not
-            // replace a meaningful refusal or geometry error with another attempt.
+            // A response without an HTTP error was processed by the model; keep a
+            // meaningful refusal/parse error instead of hiding it with another model.
             if (result.httpCode == null) return result
             if (result.httpCode in setOf(401, 403, 429)) return result
-            if (result.httpCode == 400 && result.error.orEmpty().contains("API kľúč je neplatný")) return result
-            if (result.httpCode !in setOf(400, 404, 503)) return result
-            if (result.httpCode == 503) Thread.sleep(900)
+
+            // Only malformed-request errors benefit from the schema-free compatibility
+            // mode. A timeout, connection failure or unavailable model goes directly
+            // to the lighter fallback model.
+            if (result.httpCode == 400) {
+                if (result.error.orEmpty().contains("API kľúč je neplatný")) return result
+                result = request(model, bytes, key, schemaFree = true, readTimeoutMs = timeout)
+                last = result
+                if (result.httpCode == null || result.httpCode in setOf(401, 403, 429)) return result
+            }
+            if (result.httpCode !in setOf(400, 404, 503, TIMEOUT_CODE, CONNECTION_ERROR_CODE)) return result
         }
-        return last
+        return if (last.httpCode in setOf(TIMEOUT_CODE, CONNECTION_ERROR_CODE)) {
+            last.copy(error = "Gemini neodpovedalo ani po automatickom opakovaní. Použite lokálny návrh alebo ručné odčítanie.")
+        } else last
     }
 
     internal fun requestBody(base64Image: String, schemaFree: Boolean = false): JSONObject {
@@ -159,6 +172,28 @@ object CloudReader {
             .put("required", JSONArray(listOf("readable", "reason", "layout", "hour", "minute", "second", "center", "hourTip", "minuteTip", "secondTip", "secondsCenter", "markers")))
     }
 
+    private fun availableModels(apiKey: String): List<String> {
+        val cached = modelCache
+        if (cached != null && cached.keyHash == apiKey.hashCode() && cached.keyLength == apiKey.length)
+            return cached.models
+        val discovered = discoverModels(apiKey)
+        val result = if (discovered.isNotEmpty()) discovered else
+            listOf(PRIMARY_MODEL, FALLBACK_MODEL, COMPATIBILITY_MODEL)
+        if (discovered.isNotEmpty())
+            modelCache = ModelCache(apiKey.hashCode(), apiKey.length, result)
+        return result
+    }
+
+    internal fun selectAttemptModels(models: List<String>): List<String> {
+        val distinct = models.distinct()
+        val first = distinct.firstOrNull() ?: PRIMARY_MODEL
+        val remainder = distinct.filterNot { it == first }
+        val fallback = remainder.firstOrNull { "flash-lite" in it.lowercase() }
+            ?: remainder.firstOrNull { it == COMPATIBILITY_MODEL }
+            ?: remainder.firstOrNull()
+        return listOfNotNull(first, fallback).distinct()
+    }
+
     private fun discoverModels(apiKey: String): List<String> {
         var connection: HttpURLConnection? = null
         return try {
@@ -212,13 +247,19 @@ object CloudReader {
         )
     }
 
-    private fun request(model: String, imageBytes: ByteArray, apiKey: String, schemaFree: Boolean): CloudReadResult {
+    private fun request(
+        model: String,
+        imageBytes: ByteArray,
+        apiKey: String,
+        schemaFree: Boolean,
+        readTimeoutMs: Int
+    ): CloudReadResult {
         val body = requestBody(Base64.encodeToString(imageBytes, Base64.NO_WRAP), schemaFree)
         var connection: HttpURLConnection? = null
         return try {
             connection = URL(ENDPOINT_PREFIX + model + ":generateContent").openConnection() as HttpURLConnection
             connection.apply {
-                requestMethod = "POST"; connectTimeout = 15_000; readTimeout = 30_000; doOutput = true
+                requestMethod = "POST"; connectTimeout = 15_000; readTimeout = readTimeoutMs; doOutput = true
                 setRequestProperty("Content-Type", "application/json")
                 setRequestProperty("x-goog-api-key", apiKey)
             }
@@ -234,9 +275,9 @@ object CloudReader {
                 parseResponse(response, model)
             }
         } catch (_: java.net.SocketTimeoutException) {
-            CloudReadResult(null, "Gemini: vypršal čas čakania. Použite lokálny návrh alebo ručné odčítanie.")
+            CloudReadResult(null, "Gemini: vypršal čas čakania.", TIMEOUT_CODE)
         } catch (_: java.io.IOException) {
-            CloudReadResult(null, "Gemini: pripojenie sa nepodarilo. Použite lokálny návrh alebo ručné odčítanie.")
+            CloudReadResult(null, "Gemini: pripojenie sa nepodarilo.", CONNECTION_ERROR_CODE)
         } catch (_: Exception) {
             CloudReadResult(null, "Gemini: odpoveď sa nepodarilo spracovať.")
         } finally { connection?.disconnect() }
